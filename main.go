@@ -72,7 +72,7 @@ func main() {
 	s3Prefix := pflag.String("s3-prefix", "", "S3 prefix to use")
 	authOAuth := pflag.StringSlice("auth-oauth", nil, "OAuth clients for GitHub API authentication in the format 'client_id=client_secret'")
 	authApp := pflag.StringSlice("auth-app", nil, "GitHub App clients for GitHub API authentication in the format 'app_id:installation_id=private_key'")
-	authTokens := pflag.StringSlice("auth-tokens", nil, "GitHub personal access tokens for GitHub API authentication")
+	authToken := pflag.StringSlice("auth-token", nil, "GitHub personal access tokens for GitHub API authentication")
 	rps := pflag.Int("rps", 0, "maximum requests per second (per authentication token)")
 	rateInterval := pflag.Duration("rate-interval", 60*time.Second, "Interval for rate limit checks")
 	pflag.Parse()
@@ -129,9 +129,9 @@ func main() {
 	transport = ghtransport.NewTransport(storage, transport)
 
 	// If credentials were provided, balancing requests across them.
-	if len(*authOAuth) > 0 || len(*authApp) > 0 || len(*authTokens) > 0 {
+	if len(*authOAuth) > 0 || len(*authApp) > 0 || len(*authToken) > 0 {
 		// Multiply the RPS by the number of authentication tokens.
-		*rps = *rps * (len(*authOAuth) + *rps*len(*authApp) + *rps*len(*authTokens))
+		*rps = *rps * (len(*authOAuth) + *rps*len(*authApp) + *rps*len(*authToken))
 
 		var balancing ghratelimit.BalancingTransport
 		// If using OAuth credentials, just use basic auth.
@@ -181,7 +181,7 @@ func main() {
 				},
 			})
 		}
-		for _, token := range *authTokens {
+		for _, token := range *authToken {
 			hashed := sha256.Sum256([]byte(token))
 			hashedToken := base64.StdEncoding.EncodeToString(hashed[:])
 			balancing = append(balancing, &ghratelimit.Transport{

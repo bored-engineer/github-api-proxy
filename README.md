@@ -1,6 +1,6 @@
-# GitHub API Proxy
+# GitHub REST API Proxy
 
-A high-performance reverse proxy for the GitHub API that provides authentication balancing, rate limiting, caching, and monitoring capabilities.
+A high-performance reverse proxy for the GitHub REST API that provides authentication balancing, rate limiting, caching, and monitoring capabilities.
 
 ## Features
 
@@ -29,15 +29,15 @@ go build -o github-api-proxy .
 
 ```bash
 # Start with default settings (listens on 127.0.0.1:44879)
-github-api-proxy
+./github-api-proxy
 
 # Start with custom listen address
-github-api-proxy --listen 0.0.0.0:8080
+./github-api-proxy --listen 0.0.0.0:8080
 
 # Start with TLS
 mkcert github-api-proxy.localhost
 echo "127.0.0.1 github-api-proxy.localhost" | sudo tee -a /etc/hosts
-github-api-proxy --tls-cert ./github-api-proxy.localhost.pem --tls-key ./github-api-proxy.localhost-key.pem
+./github-api-proxy --tls-cert ./github-api-proxy.localhost.pem --tls-key ./github-api-proxy.localhost-key.pem
 ```
 
 ### Authentication
@@ -46,7 +46,7 @@ The proxy supports multiple authentication methods that can be used simultaneous
 
 #### Personal Access Tokens
 ```bash
-./github-api-proxy --auth-tokens "ghp_your_token_here"
+./github-api-proxy --auth-token "ghp_your_token_here"
 ```
 
 #### OAuth Apps
@@ -62,8 +62,8 @@ The proxy supports multiple authentication methods that can be used simultaneous
 #### Multiple Authentication Methods
 ```bash
 ./github-api-proxy \
-  --auth-tokens "ghp_token1" \
-  --auth-tokens "ghp_token2" \
+  --auth-token "ghp_token1" \
+  --auth-token "ghp_token2" \
   --auth-oauth "client1:secret1" \
   --auth-app "app1:install1:key1"
 ```
@@ -83,9 +83,9 @@ The proxy supports multiple authentication methods that can be used simultaneous
 #### S3
 ```bash
 ./github-api-proxy \
-  --s3-bucket my-cache-bucket \
+  --s3-bucket github-rest-api-proxy \
   --s3-region us-west-2 \
-  --s3-prefix github-rest-api-cache/
+  --s3-prefix cache/
 ```
 
 ### Rate Limiting
@@ -110,21 +110,21 @@ The proxy supports multiple authentication methods that can be used simultaneous
 | `--url` | GitHub API URL | `https://api.github.com/` |
 | `--tls-cert` | TLS certificate file | (disabled) |
 | `--tls-key` | TLS key file | (disabled) |
-| `--auth-tokens` | GitHub personal access tokens | (none) |
-| `--auth-oauth` | OAuth clients (format: `client_id:client_secret`) | (none) |
+| `--auth-token` | GitHub personal access token | (none) |
+| `--auth-oauth` | OAuth client ID/secret (format: `client_id:client_secret`) | (none) |
 | `--auth-app` | GitHub App clients (format: `app_id:installation_id:private_key`) | (none) |
 | `--rps` | Maximum requests per second per auth token | (unlimited) |
 | `--rate-interval` | Interval for rate limit checks | `1m0s` |
-| `--bbolt-db` | Path to BoltDB for caching | (in-memory) |
+| `--bbolt-db` | Path to BoltDB for caching | (disabled) |
 | `--bbolt-bucket` | BoltDB bucket name | `github-api-proxy` |
-| `--s3-bucket` | S3 bucket for caching | (in-memory) |
+| `--s3-bucket` | S3 bucket for caching | (disabled) |
 | `--s3-region` | S3 region | (AWS default) |
 | `--s3-endpoint` | S3 endpoint (for MinIO, etc.) | (AWS default) |
 | `--s3-prefix` | S3 key prefix | (none) |
 
 ## API Endpoints
 
-- `/` - Proxies all requests to GitHub API
+- `/` - Proxies all requests to the upstream GitHub REST API
 - `/metrics` - Prometheus metrics endpoint
 
 ## Monitoring
