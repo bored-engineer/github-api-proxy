@@ -1,4 +1,4 @@
-module github.com/bored-engineer/github-proxy
+module github.com/bored-engineer/github-api-proxy
 
 go 1.24.4
 
