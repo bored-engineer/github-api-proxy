@@ -20,8 +20,10 @@ import (
 	ghtransport "github.com/bored-engineer/github-conditional-http-transport"
 	bboltstorage "github.com/bored-engineer/github-conditional-http-transport/bbolt"
 	"github.com/bored-engineer/github-conditional-http-transport/memory"
+	pebblestorage "github.com/bored-engineer/github-conditional-http-transport/pebble"
 	s3storage "github.com/bored-engineer/github-conditional-http-transport/s3"
 	ghratelimit "github.com/bored-engineer/github-rate-limit-http-transport"
+	pebble "github.com/cockroachdb/pebble"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -64,6 +66,7 @@ func main() {
 	listenAddr := pflag.String("listen", "127.0.0.1:44879", "Address to listen on")
 	tlsCert := pflag.String("tls-cert", "", "TLS certificate file to use")
 	tlsKey := pflag.String("tls-key", "", "TLS key file to use")
+	pebbleDBPath := pflag.String("pebble-db", "", "Path to PebbleDB to use for caching")
 	boltDBPath := pflag.String("bbolt-db", "", "Path to BoltDB to use for caching")
 	boltDBBucket := pflag.String("bbolt-bucket", "github-api-proxy", "BoltDB bucket to use for caching")
 	s3Bucket := pflag.String("s3-bucket", "", "S3 bucket to use")
@@ -84,7 +87,18 @@ func main() {
 
 	// Setup the relevant storage backend, defaulting to in-memory.
 	var storage ghtransport.Storage
-	if *boltDBPath != "" {
+	if *pebbleDBPath != "" {
+		pebbleStorage, err := pebblestorage.Open(*pebbleDBPath, &pebble.Options{})
+		if err != nil {
+			log.Fatal().Err(err).Msg("pebblestorage.Open failed")
+		}
+		defer func() {
+			if err := pebbleStorage.DB.Close(); err != nil {
+				log.Fatal().Err(err).Msg("(*pebble.DB).Close failed")
+			}
+		}()
+		storage = pebbleStorage
+	} else if *boltDBPath != "" {
 		boltStorage, err := bboltstorage.Open(*boltDBPath, 0600, nil, []byte(*boltDBBucket))
 		if err != nil {
 			log.Fatal().Err(err).Msg("bboltstorage.Open failed")
@@ -158,11 +172,11 @@ func main() {
 		for _, appParams := range *authApp {
 			appID, appParams, ok := strings.Cut(appParams, ":")
 			if !ok {
-				log.Fatal().Str("app_params", appParams).Msg("invalid GitHub App")
+				log.Fatal().Str("params", appParams).Msg("invalid GitHub App")
 			}
 			installationID, privateKey, ok := strings.Cut(appParams, ":")
 			if !ok {
-				log.Fatal().Str("app_params", appParams).Msg("invalid GitHub App")
+				log.Fatal().Str("params", appParams).Msg("invalid GitHub App")
 			}
 			ts, err := ghauth.App(ctx, appID, installationID, privateKey)
 			if err != nil {
