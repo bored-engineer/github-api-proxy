@@ -42,7 +42,7 @@ var (
 			Help:      "Number of requests remaining in the current rate limit window",
 			Subsystem: "github",
 		},
-		[]string{"client_id", "blah", "resource"},
+		[]string{"client_id", "resource"},
 	)
 	RateLimitReset = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -50,7 +50,7 @@ var (
 			Help:      "Unix timestamp when the current rate limit window resets",
 			Subsystem: "github",
 		},
-		[]string{"client_id", "blah", "resource"},
+		[]string{"client_id", "resource"},
 	)
 )
 
@@ -205,8 +205,8 @@ func main() {
 				},
 				Limits: ghratelimit.Limits{
 					Notify: func(resp *http.Response, resource ghratelimit.Resource, rate *ghratelimit.Rate) {
-						RateLimitRemaining.WithLabelValues(hashedToken, "", resource.String()).Set(float64(rate.Remaining))
-						RateLimitReset.WithLabelValues(hashedToken, "", resource.String()).Set(float64(rate.Reset))
+						RateLimitRemaining.WithLabelValues(hashedToken, resource.String()).Set(float64(rate.Remaining))
+						RateLimitReset.WithLabelValues(hashedToken, resource.String()).Set(float64(rate.Reset))
 					},
 				},
 			})
