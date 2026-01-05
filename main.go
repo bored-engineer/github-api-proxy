@@ -42,7 +42,7 @@ var (
 			Help:      "Number of requests remaining in the current rate limit window",
 			Subsystem: "github",
 		},
-		[]string{"client_id", "resource"},
+		[]string{"client_id", "blah", "resource"},
 	)
 	RateLimitReset = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -50,7 +50,7 @@ var (
 			Help:      "Unix timestamp when the current rate limit window resets",
 			Subsystem: "github",
 		},
-		[]string{"client_id", "resource"},
+		[]string{"client_id", "blah", "resource"},
 	)
 )
 
@@ -73,8 +73,8 @@ func main() {
 	s3Region := pflag.String("s3-region", "", "S3 region to use")
 	s3Endpoint := pflag.String("s3-endpoint", "", "S3 endpoint to use")
 	s3Prefix := pflag.String("s3-prefix", "", "S3 prefix to use")
-	authOAuth := pflag.StringSlice("auth-oauth", nil, "OAuth clients for GitHub API authentication in the format 'client_id=client_secret'")
-	authApp := pflag.StringSlice("auth-app", nil, "GitHub App clients for GitHub API authentication in the format 'app_id:installation_id=private_key'")
+	authOAuth := pflag.StringSlice("auth-oauth", nil, "OAuth clients for GitHub API authentication in the format 'client_id:client_secret'")
+	authApp := pflag.StringSlice("auth-app", nil, "GitHub App clients for GitHub API authentication in the format 'app_id:installation_id:private_key'")
 	authToken := pflag.StringSlice("auth-token", nil, "GitHub personal access tokens for GitHub API authentication")
 	rps := pflag.Int("rps", 0, "maximum requests per second (per authentication token)")
 	rateInterval := pflag.Duration("rate-interval", 60*time.Second, "Interval for rate limit checks")
@@ -205,8 +205,8 @@ func main() {
 				},
 				Limits: ghratelimit.Limits{
 					Notify: func(resp *http.Response, resource ghratelimit.Resource, rate *ghratelimit.Rate) {
-						RateLimitRemaining.WithLabelValues(hashedToken, resource.String()).Set(float64(rate.Remaining))
-						RateLimitReset.WithLabelValues(hashedToken, resource.String()).Set(float64(rate.Reset))
+						RateLimitRemaining.WithLabelValues(hashedToken, "", resource.String()).Set(float64(rate.Remaining))
+						RateLimitReset.WithLabelValues(hashedToken, "", resource.String()).Set(float64(rate.Reset))
 					},
 				},
 			})
@@ -215,6 +215,7 @@ func main() {
 		go balancing.Poll(ctx, *rateInterval, proxyURL.ResolveReference(&url.URL{
 			Path: "/rate_limit",
 		}))
+		transport = balancing
 	}
 
 	// If RPS is set, wrap the transport in an RPS transport.

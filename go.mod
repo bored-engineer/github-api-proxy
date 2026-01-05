@@ -11,6 +11,7 @@ require (
 	github.com/bored-engineer/github-conditional-http-transport/pebble v0.0.0-20260103053731-1cb7d51a6ccc
 	github.com/bored-engineer/github-conditional-http-transport/s3 v0.0.0-20260103053731-1cb7d51a6ccc
 	github.com/bored-engineer/github-rate-limit-http-transport v0.0.0-20260103051320-ca24a62ee8e9
+	github.com/cockroachdb/pebble v1.1.5
 	github.com/prometheus/client_golang v1.23.2
 	github.com/rs/zerolog v1.34.0
 	github.com/spf13/pflag v1.0.10
@@ -43,7 +44,6 @@ require (
 	github.com/cockroachdb/errors v1.12.0 // indirect
 	github.com/cockroachdb/fifo v0.0.0-20240816210425-c5d0cb0b6fc0 // indirect
 	github.com/cockroachdb/logtags v0.0.0-20241215232642-bb51bb14a506 // indirect
-	github.com/cockroachdb/pebble v1.1.5 // indirect
 	github.com/cockroachdb/redact v1.1.6 // indirect
 	github.com/cockroachdb/tokenbucket v0.0.0-20250429170803-42689b6311bb // indirect
 	github.com/getsentry/sentry-go v0.40.0 // indirect
