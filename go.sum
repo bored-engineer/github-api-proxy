@@ -50,6 +50,10 @@ github.com/bored-engineer/github-conditional-http-transport v0.0.0-2026010305373
 github.com/bored-engineer/github-conditional-http-transport v0.0.0-20260103053731-1cb7d51a6ccc/go.mod h1:aYhojujAxf5LyDNgGD2zNOnVDh5LEvA5vSxPAz6p92s=
 github.com/bored-engineer/github-conditional-http-transport v0.0.0-20260105064201-24f2388ac2a0 h1:neJZBmrrj2HccA+wIT9aE8UYavrn/35p0YJHbI1Xcqw=
 github.com/bored-engineer/github-conditional-http-transport v0.0.0-20260105064201-24f2388ac2a0/go.mod h1:aYhojujAxf5LyDNgGD2zNOnVDh5LEvA5vSxPAz6p92s=
+github.com/bored-engineer/github-conditional-http-transport v0.0.0-20260105070419-59418eee9990 h1:rZpoO+ki8OgB+QlJKbp33AzrMx5DoOUh9BlJot6aLOA=
+github.com/bored-engineer/github-conditional-http-transport v0.0.0-20260105070419-59418eee9990/go.mod h1:aYhojujAxf5LyDNgGD2zNOnVDh5LEvA5vSxPAz6p92s=
+github.com/bored-engineer/github-conditional-http-transport v0.0.0-20260105072410-0d0a872debdf h1:IEWLkneFhzqm+HiFMuJsAb4TtOw+49aETerOdvEMB7o=
+github.com/bored-engineer/github-conditional-http-transport v0.0.0-20260105072410-0d0a872debdf/go.mod h1:aYhojujAxf5LyDNgGD2zNOnVDh5LEvA5vSxPAz6p92s=
 github.com/bored-engineer/github-conditional-http-transport/bbolt v0.0.0-20260103053731-1cb7d51a6ccc h1:1QM64P2+ZvMix+xu4A/yD7xftBaTmWgS0uH0twd7oU4=
 github.com/bored-engineer/github-conditional-http-transport/bbolt v0.0.0-20260103053731-1cb7d51a6ccc/go.mod h1:y5meDdQAoD9IqPF5WqaK4fKPwbouSS6j3T89sBqJvA8=
 github.com/bored-engineer/github-conditional-http-transport/bbolt v0.0.0-20260105064201-24f2388ac2a0 h1:JT8AMo+MpEBOZvr+5j9vrXyMAGQVM714cgOXhZW7t2o=

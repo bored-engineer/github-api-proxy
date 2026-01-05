@@ -70,7 +70,7 @@ require (
 )
 
 require (
-	github.com/bored-engineer/github-conditional-http-transport v0.0.0-20260105064201-24f2388ac2a0
+	github.com/bored-engineer/github-conditional-http-transport v0.0.0-20260105072410-0d0a872debdf
 	go.etcd.io/bbolt v1.4.3 // indirect
 	golang.org/x/sys v0.39.0 // indirect
 )
