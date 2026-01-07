@@ -7,9 +7,9 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.32.6
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.95.0
 	github.com/bored-engineer/github-auth-http-transport v0.0.0-20250602054139-0c0f46e19a70
-	github.com/bored-engineer/github-conditional-http-transport/bbolt v0.0.0-20260105064201-24f2388ac2a0
-	github.com/bored-engineer/github-conditional-http-transport/pebble v0.0.0-20260105064201-24f2388ac2a0
-	github.com/bored-engineer/github-conditional-http-transport/s3 v0.0.0-20260105064201-24f2388ac2a0
+	github.com/bored-engineer/github-conditional-http-transport/bbolt v0.0.0-20260105072410-0d0a872debdf
+	github.com/bored-engineer/github-conditional-http-transport/pebble v0.0.0-20260105072410-0d0a872debdf
+	github.com/bored-engineer/github-conditional-http-transport/s3 v0.0.0-20260105072410-0d0a872debdf
 	github.com/bored-engineer/github-rate-limit-http-transport v0.0.0-20260103051320-ca24a62ee8e9
 	github.com/cockroachdb/pebble v1.1.5
 	github.com/prometheus/client_golang v1.23.2
@@ -59,7 +59,7 @@ require (
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
-	github.com/prometheus/common v0.67.4 // indirect
+	github.com/prometheus/common v0.67.5 // indirect
 	github.com/prometheus/procfs v0.19.2 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	go.uber.org/atomic v1.9.0 // indirect
