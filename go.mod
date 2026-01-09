@@ -7,9 +7,9 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.32.6
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.95.0
 	github.com/bored-engineer/github-auth-http-transport v0.0.0-20250602054139-0c0f46e19a70
-	github.com/bored-engineer/github-conditional-http-transport/bbolt v0.0.0-20260105072410-0d0a872debdf
-	github.com/bored-engineer/github-conditional-http-transport/pebble v0.0.0-20260105072410-0d0a872debdf
-	github.com/bored-engineer/github-conditional-http-transport/s3 v0.0.0-20260105072410-0d0a872debdf
+	github.com/bored-engineer/github-conditional-http-transport/bbolt v0.0.0-20260109051436-afe1be7c785f
+	github.com/bored-engineer/github-conditional-http-transport/pebble v0.0.0-20260109051436-afe1be7c785f
+	github.com/bored-engineer/github-conditional-http-transport/s3 v0.0.0-20260109051436-afe1be7c785f
 	github.com/bored-engineer/github-rate-limit-http-transport v0.0.0-20260103051320-ca24a62ee8e9
 	github.com/cockroachdb/pebble v1.1.5
 	github.com/prometheus/client_golang v1.23.2
@@ -70,7 +70,7 @@ require (
 )
 
 require (
-	github.com/bored-engineer/github-conditional-http-transport v0.0.0-20260109043409-6242d0985c44
+	github.com/bored-engineer/github-conditional-http-transport v0.0.0-20260109054733-613f71b95580
 	go.etcd.io/bbolt v1.4.3 // indirect
-	golang.org/x/sys v0.39.0 // indirect
+	golang.org/x/sys v0.40.0 // indirect
 )
