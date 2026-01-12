@@ -37,7 +37,9 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	start := time.Now()
 	resp, err := t.Base.RoundTrip(req)
 	duration := time.Since(start)
-	Latency.WithLabelValues(strconv.Itoa(resp.StatusCode)).Observe(duration.Seconds())
+	if resp != nil {
+		Latency.WithLabelValues(strconv.Itoa(resp.StatusCode)).Observe(duration.Seconds())
+	}
 
 	// Skip logging if the request is for the rate limit API
 	if req.URL.Path == "/rate_limit" {
