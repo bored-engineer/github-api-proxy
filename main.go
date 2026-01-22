@@ -23,7 +23,7 @@ import (
 	pebblestorage "github.com/bored-engineer/github-conditional-http-transport/pebble"
 	s3storage "github.com/bored-engineer/github-conditional-http-transport/s3"
 	ghratelimit "github.com/bored-engineer/github-rate-limit-http-transport"
-	pebble "github.com/cockroachdb/pebble"
+	"github.com/cockroachdb/pebble"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -36,23 +36,18 @@ import (
 
 var (
 	// Register Prometheus metrics
-	RateLimitRemaining = promauto.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name:      "rate_limit_remaining",
-			Help:      "Number of requests remaining in the current rate limit window",
-			Subsystem: "github",
-		},
-		[]string{"client_id", "resource"},
-	)
-	RateLimitReset = promauto.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name:      "rate_limit_reset",
-			Help:      "Unix timestamp when the current rate limit window resets",
-			Subsystem: "github",
-		},
-		[]string{"client_id", "resource"},
-	)
+	RateLimitRemaining *prometheus.GaugeVec
+	RateLimitReset     *prometheus.GaugeVec
 )
+
+type metricsConfig struct {
+	RemainingName      string
+	RemainingSubsystem string
+	RemainingNamespace string
+	ResetName          string
+	ResetSubsystem     string
+	ResetNamespace     string
+}
 
 func main() {
 	// Initialize zerolog
@@ -76,6 +71,12 @@ func main() {
 	authOAuth := pflag.StringSlice("auth-oauth", nil, "OAuth clients for GitHub API authentication in the format 'client_id:client_secret'")
 	authApp := pflag.StringSlice("auth-app", nil, "GitHub App clients for GitHub API authentication in the format 'app_id:installation_id:private_key'")
 	authToken := pflag.StringSlice("auth-token", nil, "GitHub personal access tokens for GitHub API authentication")
+	remainingName := pflag.String("rate-limit-remaining-name", "rate_limit_remaining", "Prometheus metric name for remaining requests gauge")
+	remainingSubsystem := pflag.String("rate-limit-remaining-subsystem", "github", "Prometheus subsystem for remaining requests gauge")
+	remainingNamespace := pflag.String("rate-limit-remaining-namespace", "", "Prometheus namespace for remaining requests gauge")
+	resetName := pflag.String("rate-limit-reset-name", "rate_limit_reset", "Prometheus metric name for reset timestamp gauge")
+	resetSubsystem := pflag.String("rate-limit-reset-subsystem", "github", "Prometheus subsystem for reset timestamp gauge")
+	resetNamespace := pflag.String("rate-limit-reset-namespace", "", "Prometheus namespace for reset timestamp gauge")
 	rps := pflag.Int("rps", 0, "maximum requests per second (per authentication token)")
 	rateInterval := pflag.Duration("rate-interval", 60*time.Second, "Interval for rate limit checks")
 	pflag.Parse()
@@ -84,6 +85,15 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("url.Parse failed")
 	}
+
+	setUpPrometheusMetrics(metricsConfig{
+		RemainingName:      *remainingName,
+		RemainingSubsystem: *remainingSubsystem,
+		RemainingNamespace: *remainingNamespace,
+		ResetName:          *resetName,
+		ResetSubsystem:     *resetSubsystem,
+		ResetNamespace:     *resetNamespace,
+	})
 
 	// Setup the relevant storage backend, defaulting to in-memory.
 	var storage ghtransport.Storage
@@ -274,5 +284,28 @@ func main() {
 	if err := server.Shutdown(ctx); err != nil {
 		log.Fatal().Err(err).Msg("(*http.Server).Shutdown failed")
 	}
+
+}
+
+func setUpPrometheusMetrics(cfg metricsConfig) {
+	RateLimitRemaining = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: cfg.RemainingNamespace,
+			Name:      cfg.RemainingName,
+			Help:      "Number of requests remaining in the current rate limit window",
+			Subsystem: cfg.RemainingSubsystem,
+		},
+		[]string{"client_id", "resource"},
+	)
+
+	RateLimitReset = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: cfg.ResetNamespace,
+			Name:      cfg.ResetName,
+			Help:      "Unix timestamp when the current rate limit window resets",
+			Subsystem: cfg.ResetSubsystem,
+		},
+		[]string{"client_id", "resource"},
+	)
 
 }
