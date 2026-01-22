@@ -56,6 +56,8 @@ github.com/bored-engineer/github-conditional-http-transport/s3 v0.0.0-2026010905
 github.com/bored-engineer/github-conditional-http-transport/s3 v0.0.0-20260109051436-afe1be7c785f/go.mod h1:CuooLqZ4BUdR0SlsgQROgeMrIaDhbMyMji37/4PNTwc=
 github.com/bored-engineer/github-rate-limit-http-transport v0.0.0-20260103051320-ca24a62ee8e9 h1:UOzAK4UA0Bj9NTeCYjFyvPnmlP0R7+DPs12b9cnGucA=
 github.com/bored-engineer/github-rate-limit-http-transport v0.0.0-20260103051320-ca24a62ee8e9/go.mod h1:PrUQEhWKA4UztBu/NSNKVVdndT/JnttdWsyJVkKTjuE=
+github.com/bored-engineer/ratelimit-transport v0.0.0-20260112232851-ff2f1f464758 h1:PhJKeBvAIXLDBy2Xxv9ecNTkXeAaTwpbmtm8uhS017Y=
+github.com/bored-engineer/ratelimit-transport v0.0.0-20260112232851-ff2f1f464758/go.mod h1:07TPmH6A0mwcdXBp1vxFrHFmRf9/ixIh8foexKvJYNQ=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
 github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
 github.com/cockroachdb/datadriven v1.0.3-0.20230413201302-be42291fc80f h1:otljaYPt5hWxV3MUfO5dFPFiOXg9CyG5/kCfayTqsJ4=

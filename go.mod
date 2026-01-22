@@ -1,6 +1,6 @@
 module github.com/bored-engineer/github-api-proxy
 
-go 1.24.4
+go 1.25.5
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.41.0
@@ -11,6 +11,7 @@ require (
 	github.com/bored-engineer/github-conditional-http-transport/pebble v0.0.0-20260109051436-afe1be7c785f
 	github.com/bored-engineer/github-conditional-http-transport/s3 v0.0.0-20260109051436-afe1be7c785f
 	github.com/bored-engineer/github-rate-limit-http-transport v0.0.0-20260103051320-ca24a62ee8e9
+	github.com/bored-engineer/ratelimit-transport v0.0.0-20260112232851-ff2f1f464758
 	github.com/cockroachdb/pebble v1.1.5
 	github.com/prometheus/client_golang v1.23.2
 	github.com/rs/zerolog v1.34.0

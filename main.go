@@ -23,6 +23,7 @@ import (
 	pebblestorage "github.com/bored-engineer/github-conditional-http-transport/pebble"
 	s3storage "github.com/bored-engineer/github-conditional-http-transport/s3"
 	ghratelimit "github.com/bored-engineer/github-rate-limit-http-transport"
+	ratelimit "github.com/bored-engineer/ratelimit-transport"
 	pebble "github.com/cockroachdb/pebble"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -30,7 +31,6 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/pflag"
-	"go.uber.org/ratelimit"
 	"golang.org/x/oauth2"
 )
 
@@ -76,7 +76,7 @@ func main() {
 	authOAuth := pflag.StringSlice("auth-oauth", nil, "OAuth clients for GitHub API authentication in the format 'client_id:client_secret'")
 	authApp := pflag.StringSlice("auth-app", nil, "GitHub App clients for GitHub API authentication in the format 'app_id:installation_id:private_key'")
 	authToken := pflag.StringSlice("auth-token", nil, "GitHub personal access tokens for GitHub API authentication")
-	rps := pflag.Int("rps", 0, "maximum requests per second (per authentication token)")
+	rph := pflag.Int("rph", 0, "maximum requests per hour (per authentication token)")
 	rateInterval := pflag.Duration("rate-interval", 60*time.Second, "Interval for rate limit checks")
 	pflag.Parse()
 
@@ -144,9 +144,6 @@ func main() {
 
 	// If credentials were provided, balancing requests across them.
 	if len(*authOAuth) > 0 || len(*authApp) > 0 || len(*authToken) > 0 {
-		// Multiply the RPS by the number of authentication tokens.
-		*rps = *rps * (len(*authOAuth) + *rps*len(*authApp) + *rps*len(*authToken))
-
 		var balancing ghratelimit.BalancingTransport
 		// If using OAuth credentials, just use basic auth.
 		for _, params := range *authOAuth {
@@ -211,18 +208,19 @@ func main() {
 				},
 			})
 		}
+		// If RPH is set, wrap each individual transport in a rate-limiting transport.
+		for _, transport := range balancing {
+			transport.Base = ratelimit.New(transport.Base, *rph, ratelimit.Per(time.Hour))
+		}
 		// Poll the rate limits for each transport.
 		go balancing.Poll(ctx, *rateInterval, proxyURL.ResolveReference(&url.URL{
 			Path: "/rate_limit",
 		}))
 		transport = balancing
-	}
-
-	// If RPS is set, wrap the transport in an RPS transport.
-	if *rps > 0 {
-		transport = &RPSTransport{
-			Limiter: ratelimit.New(*rps),
-			Base:    transport,
+	} else {
+		// If RPH is set, wrap the main transport in a rate-limiting transport.
+		if *rph > 0 {
+			transport = ratelimit.New(transport, *rph, ratelimit.Per(time.Hour))
 		}
 	}
 
