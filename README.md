@@ -48,6 +48,10 @@ The proxy supports multiple authentication methods that can be used simultaneous
 ```bash
 ./github-api-proxy --auth-token "ghp_your_token_here"
 ```
+#### PAT with optional identifier for metrics:
+```bash
+./github-api-proxy --auth-token "token_identifier:ghp_your_token_here"
+```
 
 #### OAuth Apps
 ```bash
@@ -63,7 +67,7 @@ The proxy supports multiple authentication methods that can be used simultaneous
 ```bash
 ./github-api-proxy \
   --auth-token "ghp_token1" \
-  --auth-token "ghp_token2" \
+  --auth-token "octocatToken:ghp_token2" \
   --auth-oauth "client1:secret1" \
   --auth-app "app1:install1:key1"
 ```
@@ -104,23 +108,23 @@ The proxy supports multiple authentication methods that can be used simultaneous
 
 ## Configuration Options
 
-| Flag | Description | Default |
-|------|-------------|---------|
-| `--listen` | Address to listen on | `127.0.0.1:44879` |
-| `--url` | GitHub API URL | `https://api.github.com/` |
-| `--tls-cert` | TLS certificate file | (disabled) |
-| `--tls-key` | TLS key file | (disabled) |
-| `--auth-token` | GitHub personal access token | (none) |
-| `--auth-oauth` | OAuth client ID/secret (format: `client_id:client_secret`) | (none) |
-| `--auth-app` | GitHub App clients (format: `app_id:installation_id:private_key`) | (none) |
-| `--rps` | Maximum requests per second per auth token | (unlimited) |
-| `--rate-interval` | Interval for rate limit checks | `1m0s` |
-| `--bbolt-db` | Path to BoltDB for caching | (disabled) |
-| `--bbolt-bucket` | BoltDB bucket name | `github-api-proxy` |
-| `--s3-bucket` | S3 bucket for caching | (disabled) |
-| `--s3-region` | S3 region | (AWS default) |
-| `--s3-endpoint` | S3 endpoint (for MinIO, etc.) | (AWS default) |
-| `--s3-prefix` | S3 key prefix | (none) |
+| Flag              | Description                                                                    | Default                   |
+|-------------------|--------------------------------------------------------------------------------|---------------------------|
+| `--listen`        | Address to listen on                                                           | `127.0.0.1:44879`         |
+| `--url`           | GitHub API URL                                                                 | `https://api.github.com/` |
+| `--tls-cert`      | TLS certificate file                                                           | (disabled)                |
+| `--tls-key`       | TLS key file                                                                   | (disabled)                |
+| `--auth-token`    | GitHub personal access token (format:`ghb_token` or `tokenIdentifier:ghb_token` | (none)                    |
+| `--auth-oauth`    | OAuth client ID/secret (format: `client_id:client_secret`)                     | (none)                    |
+| `--auth-app`      | GitHub App clients (format: `app_id:installation_id:private_key`)              | (none)                    |
+| `--rps`           | Maximum requests per second per auth token                                     | (unlimited)               |
+| `--rate-interval` | Interval for rate limit checks                                                 | `1m0s`                    |
+| `--bbolt-db`      | Path to BoltDB for caching                                                     | (disabled)                |
+| `--bbolt-bucket`  | BoltDB bucket name                                                             | `github-api-proxy`        |
+| `--s3-bucket`     | S3 bucket for caching                                                          | (disabled)                |
+| `--s3-region`     | S3 region                                                                      | (AWS default)             |
+| `--s3-endpoint`   | S3 endpoint (for MinIO, etc.)                                                  | (AWS default)             |
+| `--s3-prefix`     | S3 key prefix                                                                  | (none)                    |
 
 ## API Endpoints
 
