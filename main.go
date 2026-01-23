@@ -24,8 +24,7 @@ import (
 	redisstorage "github.com/bored-engineer/github-conditional-http-transport/redis"
 	s3storage "github.com/bored-engineer/github-conditional-http-transport/s3"
 	ghratelimit "github.com/bored-engineer/github-rate-limit-http-transport"
-	ratelimit "github.com/bored-engineer/ratelimit-transport"
-	"github.com/cockroachdb/pebble/v2"
+	"github.com/bored-engineer/ratelimit-transport"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -102,7 +101,7 @@ func main() {
 	// Set up the relevant storage backend, defaulting to in-memory.
 	var storage ghtransport.Storage
 	if *pebbleDBPath != "" {
-		pebbleStorage, err := pebblestorage.Open(*pebbleDBPath, &pebble.Options{})
+		pebbleStorage, err := pebblestorage.Open(*pebbleDBPath, nil)
 		if err != nil {
 			log.Fatal().Err(err).Msg("pebblestorage.Open failed")
 		}
