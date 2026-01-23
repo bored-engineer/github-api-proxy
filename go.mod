@@ -9,11 +9,12 @@ require (
 	github.com/bored-engineer/github-auth-http-transport v0.0.0-20250602054139-0c0f46e19a70
 	github.com/bored-engineer/github-conditional-http-transport/bbolt v0.0.0-20260121230238-d9cbf4406613
 	github.com/bored-engineer/github-conditional-http-transport/pebble v0.0.0-20260121230238-d9cbf4406613
+	github.com/bored-engineer/github-conditional-http-transport/redis v0.0.0-20260121230238-d9cbf4406613
 	github.com/bored-engineer/github-conditional-http-transport/s3 v0.0.0-20260121230238-d9cbf4406613
 	github.com/bored-engineer/github-rate-limit-http-transport v0.0.0-20260103051320-ca24a62ee8e9
 	github.com/bored-engineer/ratelimit-transport v0.0.0-20260112232851-ff2f1f464758
-	github.com/cockroachdb/pebble/v2 v2.1.4
 	github.com/prometheus/client_golang v1.23.2
+	github.com/redis/go-redis/v9 v9.17.2
 	github.com/rs/zerolog v1.34.0
 	github.com/spf13/pflag v1.0.10
 	go.uber.org/ratelimit v0.3.1
@@ -47,9 +48,11 @@ require (
 	github.com/cockroachdb/crlib v0.0.0-20251122031428-fe658a2dbda1 // indirect
 	github.com/cockroachdb/errors v1.12.0 // indirect
 	github.com/cockroachdb/logtags v0.0.0-20241215232642-bb51bb14a506 // indirect
+	github.com/cockroachdb/pebble/v2 v2.1.4 // indirect
 	github.com/cockroachdb/redact v1.1.6 // indirect
 	github.com/cockroachdb/swiss v0.0.0-20251224182025-b0f6560f979b // indirect
 	github.com/cockroachdb/tokenbucket v0.0.0-20250429170803-42689b6311bb // indirect
+	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/getsentry/sentry-go v0.41.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/snappy v1.0.0 // indirect
