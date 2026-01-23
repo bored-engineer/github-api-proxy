@@ -6,7 +6,7 @@ A high-performance reverse proxy for the GitHub REST API that provides authentic
 
 - **Authentication Balancing**: Distribute requests across multiple GitHub tokens/apps
 - **Rate Limiting**: Built-in rate limiting with configurable requests per second
-- **Caching**: Multiple storage backends (in-memory, BoltDB, S3) for response caching using [bored-engineer/github-conditional-http-transport](https://github.com/bored-engineer/github-conditional-http-transport)
+- **Caching**: Multiple storage backends (in-memory, PebbleDB, BoltDB, S3, Redis) for response caching using [bored-engineer/github-conditional-http-transport](https://github.com/bored-engineer/github-conditional-http-transport)
 - **Monitoring**: Prometheus metrics for rate limit tracking
 
 ## Installation
@@ -75,9 +75,19 @@ The proxy supports multiple authentication methods that can be used simultaneous
 ./github-api-proxy
 ```
 
+#### Pebble
+```bash
+./github-api-proxy --pebble-db /path/to/cache.db
+```
+
 #### BoltDB
 ```bash
 ./github-api-proxy --bbolt-db /path/to/cache.db --bbolt-bucket my-bucket
+```
+
+#### Redis
+```bash
+./github-api-proxy --redis-addr 127.0.0.1:6379
 ```
 
 #### S3
