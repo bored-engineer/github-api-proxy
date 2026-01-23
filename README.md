@@ -101,8 +101,8 @@ The proxy supports multiple authentication methods that can be used simultaneous
 ### Rate Limiting
 
 ```bash
-# Limit to 5000 requests per second per authentication token
-./github-api-proxy --rps 5000
+# Limit to 5000 requests per hour per authentication token
+./github-api-proxy --rph 5000
 ```
 
 ### Custom GitHub API URL
@@ -123,7 +123,7 @@ The proxy supports multiple authentication methods that can be used simultaneous
 | `--auth-token` | GitHub personal access token | (none) |
 | `--auth-oauth` | OAuth client ID/secret (format: `client_id:client_secret`) | (none) |
 | `--auth-app` | GitHub App clients (format: `app_id:installation_id:private_key`) | (none) |
-| `--rps` | Maximum requests per second per auth token | (unlimited) |
+| `--rph` | Maximum requests per second per auth token | (unlimited) |
 | `--rate-interval` | Interval for rate limit checks | `1m0s` |
 | `--bbolt-db` | Path to BoltDB for caching | (disabled) |
 | `--bbolt-bucket` | BoltDB bucket name | `github-api-proxy` |
