@@ -24,7 +24,7 @@ import (
 	redisstorage "github.com/bored-engineer/github-conditional-http-transport/redis"
 	s3storage "github.com/bored-engineer/github-conditional-http-transport/s3"
 	ghratelimit "github.com/bored-engineer/github-rate-limit-http-transport"
-	ratelimit "github.com/bored-engineer/ratelimit-transport"
+	"github.com/bored-engineer/ratelimit-transport"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -53,6 +53,14 @@ var (
 		},
 		[]string{"client_id", "resource"},
 	)
+
+	// Abstract ghauth functions for easier testing
+	ghauthBasic = func(base http.RoundTripper, clientID, clientSecret string) (http.RoundTripper, error) {
+		return ghauth.Basic(base, clientID, clientSecret)
+	}
+	ghauthApp = func(ctx context.Context, appID, installationID, privateKey string) (oauth2.TokenSource, error) {
+		return ghauth.App(ctx, appID, installationID, privateKey)
+	}
 )
 
 func main() {
@@ -80,7 +88,7 @@ func main() {
 	redisDB := pflag.Int("redis-db", 0, "Redis database to use")
 	authOAuth := pflag.StringSlice("auth-oauth", nil, "OAuth clients for GitHub API authentication in the format 'client_id:client_secret'")
 	authApp := pflag.StringSlice("auth-app", nil, "GitHub App clients for GitHub API authentication in the format 'app_id:installation_id:private_key'")
-	authToken := pflag.StringSlice("auth-token", nil, "GitHub personal access tokens for GitHub API authentication")
+	authToken := pflag.StringSlice("auth-token", nil, "GitHub personal access tokens for GitHub API authentication with an optional identifier for use in metrics labeling in the format 'token' or 'identifier:token'")
 	rph := pflag.Int("rph", 0, "maximum requests per hour (per authentication token)")
 	rateInterval := pflag.Duration("rate-interval", 60*time.Second, "Interval for rate limit checks")
 	pflag.Parse()
@@ -90,7 +98,7 @@ func main() {
 		log.Fatal().Err(err).Msg("url.Parse failed")
 	}
 
-	// Setup the relevant storage backend, defaulting to in-memory.
+	// Set up the relevant storage backend, defaulting to in-memory.
 	var storage ghtransport.Storage
 	if *pebbleDBPath != "" {
 		pebbleStorage, err := pebblestorage.Open(*pebbleDBPath, nil)
@@ -152,7 +160,7 @@ func main() {
 		Base: http.DefaultTransport,
 	}
 
-	// Setup the caching transport as the base transport.
+	// Set up the caching transport as the base transport.
 	transport = ghtransport.NewTransport(storage, transport)
 
 	// If credentials were provided, balancing requests across them.
@@ -160,70 +168,14 @@ func main() {
 		var balancing ghratelimit.BalancingTransport
 		// If using OAuth credentials, just use basic auth.
 		for _, params := range *authOAuth {
-			clientID, clientSecret, ok := strings.Cut(params, ":")
-			if !ok {
-				log.Fatal().Str("params", params).Msg("invalid OAuth client")
-			}
-			authTransport, err := ghauth.Basic(transport, clientID, clientSecret)
-			if err != nil {
-				log.Fatal().Err(err).Str("client_id", clientID).Msg("ghauth.Basic failed")
-			}
-			balancing = append(balancing, &ghratelimit.Transport{
-				Base: authTransport,
-				Limits: ghratelimit.Limits{
-					Notify: func(resp *http.Response, resource ghratelimit.Resource, rate *ghratelimit.Rate) {
-						RateLimitRemaining.WithLabelValues(clientID, resource.String()).Set(float64(rate.Remaining))
-						RateLimitReset.WithLabelValues(clientID, resource.String()).Set(float64(rate.Reset))
-					},
-				},
-			})
+			balancing = configureOauthTransport(params, transport, balancing)
 		}
 		// If using GitHub App credentials, use the GitHub App transport.
 		for _, appParams := range *authApp {
-			appID, appParams, ok := strings.Cut(appParams, ":")
-			if !ok {
-				log.Fatal().Str("params", appParams).Msg("invalid GitHub App")
-			}
-			installationID, privateKey, ok := strings.Cut(appParams, ":")
-			if !ok {
-				log.Fatal().Str("params", appParams).Msg("invalid GitHub App")
-			}
-			ts, err := ghauth.App(ctx, appID, installationID, privateKey)
-			if err != nil {
-				log.Fatal().Err(err).Str("app_id", appID).Msg("ghauth.App failed")
-			}
-			balancing = append(balancing, &ghratelimit.Transport{
-				Base: &oauth2.Transport{
-					Base:   transport,
-					Source: ts,
-				},
-				Limits: ghratelimit.Limits{
-					Notify: func(resp *http.Response, resource ghratelimit.Resource, rate *ghratelimit.Rate) {
-						RateLimitRemaining.WithLabelValues(appID+":"+installationID, resource.String()).Set(float64(rate.Remaining))
-						RateLimitReset.WithLabelValues(appID+":"+installationID, resource.String()).Set(float64(rate.Reset))
-					},
-				},
-			})
+			balancing = configureGitHubApp(ctx, appParams, transport, balancing)
 		}
 		for _, token := range *authToken {
-			hashed := sha256.Sum256([]byte(token))
-			hashedToken := base64.StdEncoding.EncodeToString(hashed[:])
-			balancing = append(balancing, &ghratelimit.Transport{
-				Base: &oauth2.Transport{
-					Base:   transport,
-					Source: oauth2.StaticTokenSource(ghauth.Token(token)),
-				},
-				Limits: ghratelimit.Limits{
-					Notify: func(resp *http.Response, resource ghratelimit.Resource, rate *ghratelimit.Rate) {
-						RateLimitRemaining.WithLabelValues(hashedToken, resource.String()).Set(float64(rate.Remaining))
-						RateLimitReset.WithLabelValues(hashedToken, resource.String()).Set(float64(rate.Reset))
-					},
-				},
-			})
-		}
-		// If RPH is set, wrap each individual transport in a rate-limiting transport.
-		for _, transport := range balancing {
-			transport.Base = ratelimit.New(transport.Base, *rph, ratelimit.Per(time.Hour))
+			balancing = configurePatTransport(token, transport, balancing)
 		}
 		// Poll the rate limits for each transport.
 		go balancing.Poll(ctx, *rateInterval, proxyURL.ResolveReference(&url.URL{
@@ -237,7 +189,7 @@ func main() {
 		}
 	}
 
-	// Setup the reverse proxy.
+	// Set up the reverse proxy.
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(proxyURL)
@@ -257,7 +209,7 @@ func main() {
 		Transport: transport,
 	}
 
-	// Setup the HTTP router.
+	// Set up the HTTP router.
 	mux := http.NewServeMux()
 	mux.Handle("/", proxy)
 	mux.Handle("/metrics", promhttp.Handler())
@@ -286,4 +238,75 @@ func main() {
 		log.Fatal().Err(err).Msg("(*http.Server).Shutdown failed")
 	}
 
+}
+
+func configureGitHubApp(ctx context.Context, appParams string, transport http.RoundTripper, balancing ghratelimit.BalancingTransport) ghratelimit.BalancingTransport {
+	appID, appParams, ok := strings.Cut(appParams, ":")
+	if !ok {
+		log.Fatal().Str("params", appParams).Msg("invalid GitHub App")
+	}
+	installationID, privateKey, ok := strings.Cut(appParams, ":")
+	if !ok {
+		log.Fatal().Str("params", appParams).Msg("invalid GitHub App")
+	}
+	ts, err := ghauthApp(ctx, appID, installationID, privateKey)
+	if err != nil {
+		log.Fatal().Err(err).Str("app_id", appID).Msg("ghauth.App failed")
+	}
+	balancing = append(balancing, &ghratelimit.Transport{
+		Base: &oauth2.Transport{
+			Base:   transport,
+			Source: ts,
+		},
+		Limits: ghratelimit.Limits{
+			Notify: func(resp *http.Response, resource ghratelimit.Resource, rate *ghratelimit.Rate) {
+				RateLimitRemaining.WithLabelValues(appID+":"+installationID, resource.String()).Set(float64(rate.Remaining))
+				RateLimitReset.WithLabelValues(appID+":"+installationID, resource.String()).Set(float64(rate.Reset))
+			},
+		},
+	})
+	return balancing
+}
+
+func configureOauthTransport(params string, transport http.RoundTripper, balancing ghratelimit.BalancingTransport) ghratelimit.BalancingTransport {
+	clientID, clientSecret, ok := strings.Cut(params, ":")
+	if !ok {
+		log.Fatal().Str("params", params).Msg("invalid OAuth client")
+	}
+	authTransport, err := ghauthBasic(transport, clientID, clientSecret)
+	if err != nil {
+		log.Fatal().Err(err).Str("client_id", clientID).Msg("ghauth.Basic failed")
+	}
+	balancing = append(balancing, &ghratelimit.Transport{
+		Base: authTransport,
+		Limits: ghratelimit.Limits{
+			Notify: func(resp *http.Response, resource ghratelimit.Resource, rate *ghratelimit.Rate) {
+				RateLimitRemaining.WithLabelValues(clientID, resource.String()).Set(float64(rate.Remaining))
+				RateLimitReset.WithLabelValues(clientID, resource.String()).Set(float64(rate.Reset))
+			},
+		},
+	})
+	return balancing
+}
+
+func configurePatTransport(token string, transport http.RoundTripper, balancing ghratelimit.BalancingTransport) ghratelimit.BalancingTransport {
+	tokenId, token, ok := strings.Cut(token, ":")
+	if !ok {
+		token = tokenId
+		hashed := sha256.Sum256([]byte(token))
+		tokenId = base64.StdEncoding.EncodeToString(hashed[:])
+	}
+	balancing = append(balancing, &ghratelimit.Transport{
+		Base: &oauth2.Transport{
+			Base:   transport,
+			Source: oauth2.StaticTokenSource(ghauth.Token(token)),
+		},
+		Limits: ghratelimit.Limits{
+			Notify: func(resp *http.Response, resource ghratelimit.Resource, rate *ghratelimit.Rate) {
+				RateLimitRemaining.WithLabelValues(tokenId, resource.String()).Set(float64(rate.Remaining))
+				RateLimitReset.WithLabelValues(tokenId, resource.String()).Set(float64(rate.Reset))
+			},
+		},
+	})
+	return balancing
 }
