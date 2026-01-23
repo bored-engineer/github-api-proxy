@@ -6,7 +6,7 @@ A high-performance reverse proxy for the GitHub REST API that provides authentic
 
 - **Authentication Balancing**: Distribute requests across multiple GitHub tokens/apps
 - **Rate Limiting**: Built-in rate limiting with configurable requests per second
-- **Caching**: Multiple storage backends (in-memory, BoltDB, S3) for response caching using [bored-engineer/github-conditional-http-transport](https://github.com/bored-engineer/github-conditional-http-transport)
+- **Caching**: Multiple storage backends (in-memory, PebbleDB, BoltDB, S3, Redis) for response caching using [bored-engineer/github-conditional-http-transport](https://github.com/bored-engineer/github-conditional-http-transport)
 - **Monitoring**: Prometheus metrics for rate limit tracking
 
 ## Installation
@@ -75,9 +75,19 @@ The proxy supports multiple authentication methods that can be used simultaneous
 ./github-api-proxy
 ```
 
+#### Pebble
+```bash
+./github-api-proxy --pebble-db /path/to/cache.db
+```
+
 #### BoltDB
 ```bash
 ./github-api-proxy --bbolt-db /path/to/cache.db --bbolt-bucket my-bucket
+```
+
+#### Redis
+```bash
+./github-api-proxy --redis-addr 127.0.0.1:6379
 ```
 
 #### S3
@@ -91,8 +101,8 @@ The proxy supports multiple authentication methods that can be used simultaneous
 ### Rate Limiting
 
 ```bash
-# Limit to 5000 requests per second per authentication token
-./github-api-proxy --rps 5000
+# Limit to 5000 requests per hour per authentication token
+./github-api-proxy --rph 5000
 ```
 
 ### Custom GitHub API URL
@@ -113,14 +123,19 @@ The proxy supports multiple authentication methods that can be used simultaneous
 | `--auth-token` | GitHub personal access token | (none) |
 | `--auth-oauth` | OAuth client ID/secret (format: `client_id:client_secret`) | (none) |
 | `--auth-app` | GitHub App clients (format: `app_id:installation_id:private_key`) | (none) |
-| `--rps` | Maximum requests per second per auth token | (unlimited) |
+| `--rph` | Maximum requests per second per auth token | (unlimited) |
 | `--rate-interval` | Interval for rate limit checks | `1m0s` |
 | `--bbolt-db` | Path to BoltDB for caching | (disabled) |
 | `--bbolt-bucket` | BoltDB bucket name | `github-api-proxy` |
+| `--pebble-db` | Path to PebbleDB for caching | (disabled) |
 | `--s3-bucket` | S3 bucket for caching | (disabled) |
 | `--s3-region` | S3 region | (AWS default) |
 | `--s3-endpoint` | S3 endpoint (for MinIO, etc.) | (AWS default) |
 | `--s3-prefix` | S3 key prefix | (none) |
+| `--redis-addr` | Redis address for caching | (disabled) |
+| `--redis-username` | Redis username | (none) |
+| `--redis-password` | Redis password | (none) |
+| `--redis-db` | Redis database number | `0` |
 
 ## API Endpoints
 

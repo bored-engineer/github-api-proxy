@@ -21,16 +21,17 @@ import (
 	bboltstorage "github.com/bored-engineer/github-conditional-http-transport/bbolt"
 	"github.com/bored-engineer/github-conditional-http-transport/memory"
 	pebblestorage "github.com/bored-engineer/github-conditional-http-transport/pebble"
+	redisstorage "github.com/bored-engineer/github-conditional-http-transport/redis"
 	s3storage "github.com/bored-engineer/github-conditional-http-transport/s3"
 	ghratelimit "github.com/bored-engineer/github-rate-limit-http-transport"
-	"github.com/cockroachdb/pebble"
+	ratelimit "github.com/bored-engineer/ratelimit-transport"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/pflag"
-	"go.uber.org/ratelimit"
 	"golang.org/x/oauth2"
 )
 
@@ -68,16 +69,20 @@ func main() {
 	s3Region := pflag.String("s3-region", "", "S3 region to use")
 	s3Endpoint := pflag.String("s3-endpoint", "", "S3 endpoint to use")
 	s3Prefix := pflag.String("s3-prefix", "", "S3 prefix to use")
+	redisAddr := pflag.String("redis-addr", "", "Redis address to use")
+	redisUsername := pflag.String("redis-username", "", "Redis username to use")
+	redisPassword := pflag.String("redis-password", "", "Redis password to use")
+	redisDB := pflag.Int("redis-db", 0, "Redis database to use")
 	authOAuth := pflag.StringSlice("auth-oauth", nil, "OAuth clients for GitHub API authentication in the format 'client_id:client_secret'")
 	authApp := pflag.StringSlice("auth-app", nil, "GitHub App clients for GitHub API authentication in the format 'app_id:installation_id:private_key'")
 	authToken := pflag.StringSlice("auth-token", nil, "GitHub personal access tokens for GitHub API authentication")
+	rph := pflag.Int("rph", 0, "maximum requests per hour (per authentication token)")
 	remainingName := pflag.String("rate-limit-remaining-name", "rate_limit_remaining", "Prometheus metric name for remaining requests gauge")
 	remainingSubsystem := pflag.String("rate-limit-remaining-subsystem", "github", "Prometheus subsystem for remaining requests gauge")
 	remainingNamespace := pflag.String("rate-limit-remaining-namespace", "", "Prometheus namespace for remaining requests gauge")
 	resetName := pflag.String("rate-limit-reset-name", "rate_limit_reset", "Prometheus metric name for reset timestamp gauge")
 	resetSubsystem := pflag.String("rate-limit-reset-subsystem", "github", "Prometheus subsystem for reset timestamp gauge")
 	resetNamespace := pflag.String("rate-limit-reset-namespace", "", "Prometheus namespace for reset timestamp gauge")
-	rps := pflag.Int("rps", 0, "maximum requests per second (per authentication token)")
 	rateInterval := pflag.Duration("rate-interval", 60*time.Second, "Interval for rate limit checks")
 	pflag.Parse()
 
@@ -98,7 +103,7 @@ func main() {
 	// Setup the relevant storage backend, defaulting to in-memory.
 	var storage ghtransport.Storage
 	if *pebbleDBPath != "" {
-		pebbleStorage, err := pebblestorage.Open(*pebbleDBPath, &pebble.Options{})
+		pebbleStorage, err := pebblestorage.Open(*pebbleDBPath, nil)
 		if err != nil {
 			log.Fatal().Err(err).Msg("pebblestorage.Open failed")
 		}
@@ -140,6 +145,14 @@ func main() {
 			log.Fatal().Err(err).Msg("s3storage.New failed")
 		}
 		storage = s3Storage
+	} else if *redisAddr != "" {
+		redisClient := redis.NewClient(&redis.Options{
+			Addr:     *redisAddr,
+			Username: *redisUsername,
+			Password: *redisPassword,
+			DB:       *redisDB,
+		})
+		storage = redisstorage.New(redisClient)
 	} else {
 		storage = memory.NewStorage()
 	}
@@ -154,9 +167,6 @@ func main() {
 
 	// If credentials were provided, balancing requests across them.
 	if len(*authOAuth) > 0 || len(*authApp) > 0 || len(*authToken) > 0 {
-		// Multiply the RPS by the number of authentication tokens.
-		*rps = *rps * (len(*authOAuth) + *rps*len(*authApp) + *rps*len(*authToken))
-
 		var balancing ghratelimit.BalancingTransport
 		// If using OAuth credentials, just use basic auth.
 		for _, params := range *authOAuth {
@@ -221,18 +231,19 @@ func main() {
 				},
 			})
 		}
+		// If RPH is set, wrap each individual transport in a rate-limiting transport.
+		for _, transport := range balancing {
+			transport.Base = ratelimit.New(transport.Base, *rph, ratelimit.Per(time.Hour))
+		}
 		// Poll the rate limits for each transport.
 		go balancing.Poll(ctx, *rateInterval, proxyURL.ResolveReference(&url.URL{
 			Path: "/rate_limit",
 		}))
 		transport = balancing
-	}
-
-	// If RPS is set, wrap the transport in an RPS transport.
-	if *rps > 0 {
-		transport = &RPSTransport{
-			Limiter: ratelimit.New(*rps),
-			Base:    transport,
+	} else {
+		// If RPH is set, wrap the main transport in a rate-limiting transport.
+		if *rph > 0 {
+			transport = ratelimit.New(transport, *rph, ratelimit.Per(time.Hour))
 		}
 	}
 
