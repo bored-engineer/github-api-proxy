@@ -24,7 +24,6 @@ import (
 	s3storage "github.com/bored-engineer/github-conditional-http-transport/s3"
 	ghratelimit "github.com/bored-engineer/github-rate-limit-http-transport"
 	ratelimit "github.com/bored-engineer/ratelimit-transport"
-	pebble "github.com/cockroachdb/pebble"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -88,7 +87,7 @@ func main() {
 	// Setup the relevant storage backend, defaulting to in-memory.
 	var storage ghtransport.Storage
 	if *pebbleDBPath != "" {
-		pebbleStorage, err := pebblestorage.Open(*pebbleDBPath, &pebble.Options{})
+		pebbleStorage, err := pebblestorage.Open(*pebbleDBPath, nil)
 		if err != nil {
 			log.Fatal().Err(err).Msg("pebblestorage.Open failed")
 		}
