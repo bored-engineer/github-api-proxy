@@ -127,10 +127,15 @@ The proxy supports multiple authentication methods that can be used simultaneous
 | `--rate-interval` | Interval for rate limit checks | `1m0s` |
 | `--bbolt-db` | Path to BoltDB for caching | (disabled) |
 | `--bbolt-bucket` | BoltDB bucket name | `github-api-proxy` |
+| `--pebble-db` | Path to PebbleDB for caching | (disabled) |
 | `--s3-bucket` | S3 bucket for caching | (disabled) |
 | `--s3-region` | S3 region | (AWS default) |
 | `--s3-endpoint` | S3 endpoint (for MinIO, etc.) | (AWS default) |
 | `--s3-prefix` | S3 key prefix | (none) |
+| `--redis-addr` | Redis address for caching | (disabled) |
+| `--redis-username` | Redis username | (none) |
+| `--redis-password` | Redis password | (none) |
+| `--redis-db` | Redis database number | `0` |
 
 ## API Endpoints
 
