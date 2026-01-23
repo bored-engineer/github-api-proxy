@@ -112,7 +112,7 @@ func TestSetUpOauthTransport(t *testing.T) {
 		return authTransport, nil
 	}
 
-	balancing := setUpOauthTransport("client-id:client-secret", base, nil)
+	balancing := configureOauthTransport("client-id:client-secret", base, nil)
 	if len(balancing) != 1 {
 		t.Fatalf("expected one transport, got %d", len(balancing))
 	}
@@ -153,7 +153,7 @@ func TestSetupGitHubApp(t *testing.T) {
 		return ts, nil
 	}
 
-	balancing := setupGitHubApp(context.Background(), "app-1:inst-2:pk", base, nil)
+	balancing := configureGitHubApp(context.Background(), "app-1:inst-2:pk", base, nil)
 	if len(balancing) != 1 {
 		t.Fatalf("expected one transport, got %d", len(balancing))
 	}

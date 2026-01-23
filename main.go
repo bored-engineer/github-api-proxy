@@ -168,11 +168,11 @@ func main() {
 		var balancing ghratelimit.BalancingTransport
 		// If using OAuth credentials, just use basic auth.
 		for _, params := range *authOAuth {
-			balancing = setUpOauthTransport(params, transport, balancing)
+			balancing = configureOauthTransport(params, transport, balancing)
 		}
 		// If using GitHub App credentials, use the GitHub App transport.
 		for _, appParams := range *authApp {
-			balancing = setupGitHubApp(ctx, appParams, transport, balancing)
+			balancing = configureGitHubApp(ctx, appParams, transport, balancing)
 		}
 		for _, token := range *authToken {
 			balancing = configurePatTransport(token, transport, balancing)
@@ -240,7 +240,7 @@ func main() {
 
 }
 
-func setupGitHubApp(ctx context.Context, appParams string, transport http.RoundTripper, balancing ghratelimit.BalancingTransport) ghratelimit.BalancingTransport {
+func configureGitHubApp(ctx context.Context, appParams string, transport http.RoundTripper, balancing ghratelimit.BalancingTransport) ghratelimit.BalancingTransport {
 	appID, appParams, ok := strings.Cut(appParams, ":")
 	if !ok {
 		log.Fatal().Str("params", appParams).Msg("invalid GitHub App")
@@ -268,7 +268,7 @@ func setupGitHubApp(ctx context.Context, appParams string, transport http.RoundT
 	return balancing
 }
 
-func setUpOauthTransport(params string, transport http.RoundTripper, balancing ghratelimit.BalancingTransport) ghratelimit.BalancingTransport {
+func configureOauthTransport(params string, transport http.RoundTripper, balancing ghratelimit.BalancingTransport) ghratelimit.BalancingTransport {
 	clientID, clientSecret, ok := strings.Cut(params, ":")
 	if !ok {
 		log.Fatal().Str("params", params).Msg("invalid OAuth client")
