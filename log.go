@@ -107,5 +107,5 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	// Fire the log event.
 	evt.Msg("HTTP request")
 
-	return resp, nil
+	return resp, err
 }

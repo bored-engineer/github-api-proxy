@@ -25,6 +25,7 @@ import (
 	s3storage "github.com/bored-engineer/github-conditional-http-transport/s3"
 	ghratelimit "github.com/bored-engineer/github-rate-limit-http-transport"
 	ratelimit "github.com/bored-engineer/ratelimit-transport"
+	walltime "github.com/bored-engineer/walltime-transport"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -83,11 +84,23 @@ func main() {
 	authToken := pflag.StringSlice("auth-token", nil, "GitHub personal access tokens for GitHub API authentication")
 	rph := pflag.Int("rph", 0, "maximum requests per hour (per authentication token)")
 	rateInterval := pflag.Duration("rate-interval", 60*time.Second, "Interval for rate limit checks")
+	srcIPs := pflag.StringSlice("src-ip", nil, "Source IP addresses to balance outgoing requests across (round-robin)")
+	walltimeLimit := pflag.Duration("walltime-limit", 90*time.Second, "Maximum cumulative request walltime permitted per --walltime-period, per authenticated token (and per --src-ip, if set)")
+	walltimePeriod := pflag.Duration("walltime-period", 60*time.Second, "Interval over which --walltime-limit is enforced")
+	walltimeEstimate := pflag.Duration("walltime-estimate", 10*time.Second, "Pessimistic upper bound on request duration reserved before each request starts")
+	walltimeOffset := pflag.Duration("walltime-offset", 0, "Amount subtracted from each request's measured walltime before it's charged")
 	pflag.Parse()
 
 	proxyURL, err := url.Parse(*apiURL)
 	if err != nil {
 		log.Fatal().Err(err).Msg("url.Parse failed")
+	}
+
+	// Build one dedicated transport per source IP (or just the default
+	// transport if none were provided) to balance outgoing connections.
+	srcIPDials, err := SrcIPTransports(*srcIPs, http.DefaultTransport)
+	if err != nil {
+		log.Fatal().Err(err).Msg("SrcIPTransports failed")
 	}
 
 	// Setup the relevant storage backend, defaulting to in-memory.
@@ -147,13 +160,33 @@ func main() {
 		storage = memory.NewStorage()
 	}
 
-	// Implement the logging _before_ the caching
-	var transport http.RoundTripper = &LoggingTransport{
-		Base: http.DefaultTransport,
+	// Wrap each source IP's dial transport with logging (before) and
+	// caching (after), giving one full chain per source IP.
+	chains := make([]http.RoundTripper, len(srcIPDials))
+	for i, dial := range srcIPDials {
+		chains[i] = ghtransport.NewTransport(storage, &LoggingTransport{Base: dial})
 	}
 
-	// Setup the caching transport as the base transport.
-	transport = ghtransport.NewTransport(storage, transport)
+	// The default transport balances requests across all source IPs.
+	var transport http.RoundTripper = RoundRobin(chains)
+
+	// newBaseTransport returns a fresh walltime-throttled transport for
+	// a single authenticated token: one walltime.Transport instance per
+	// source IP (or a single instance if no --src-ip was given), balanced
+	// round-robin per request across them.
+	newBaseTransport := func() http.RoundTripper {
+		instances := make([]http.RoundTripper, len(chains))
+		for idx, chain := range chains {
+			instances[idx] = walltime.New(
+				walltime.Per(*walltimeLimit, *walltimePeriod),
+				*walltimeLimit,
+				walltime.WithTransport(chain),
+				walltime.WithEstimate(*walltimeEstimate),
+				walltime.WithOffset(*walltimeOffset),
+			)
+		}
+		return RoundRobin(instances)
+	}
 
 	// If credentials were provided, balancing requests across them.
 	if len(*authOAuth) > 0 || len(*authApp) > 0 || len(*authToken) > 0 {
@@ -164,7 +197,7 @@ func main() {
 			if !ok {
 				log.Fatal().Str("params", params).Msg("invalid OAuth client")
 			}
-			authTransport, err := ghauth.Basic(transport, clientID, clientSecret)
+			authTransport, err := ghauth.Basic(newBaseTransport(), clientID, clientSecret)
 			if err != nil {
 				log.Fatal().Err(err).Str("client_id", clientID).Msg("ghauth.Basic failed")
 			}
@@ -194,7 +227,7 @@ func main() {
 			}
 			balancing = append(balancing, &ghratelimit.Transport{
 				Base: &oauth2.Transport{
-					Base:   transport,
+					Base:   newBaseTransport(),
 					Source: ts,
 				},
 				Limits: ghratelimit.Limits{
@@ -210,7 +243,7 @@ func main() {
 			hashedToken := base64.StdEncoding.EncodeToString(hashed[:])
 			balancing = append(balancing, &ghratelimit.Transport{
 				Base: &oauth2.Transport{
-					Base:   transport,
+					Base:   newBaseTransport(),
 					Source: oauth2.StaticTokenSource(ghauth.Token(token)),
 				},
 				Limits: ghratelimit.Limits{
