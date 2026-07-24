@@ -23,6 +23,13 @@ cd github-api-proxy
 go build -o github-api-proxy .
 ```
 
+Or use the container image, published for `linux/amd64` and `linux/arm64`:
+
+```bash
+docker run --rm -p 44879:44879 ghcr.io/bored-engineer/github-api-proxy:main \
+  --listen 0.0.0.0:44879
+```
+
 ## Usage
 
 ### Basic Usage
