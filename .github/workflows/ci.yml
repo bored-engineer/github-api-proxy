@@ -48,8 +48,63 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
-  build:
-    needs: [test, tag]
+  crossbuild:
+    needs: [test]
+    if: ${{ success() }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          ext=""
+          [ "${{ matrix.goos }}" = "windows" ] && ext=".exe"
+          mkdir -p dist
+          go build -trimpath -ldflags="-s -w" -o "dist/github-api-proxy_${{ matrix.goos }}_${{ matrix.goarch }}${ext}" .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: binaries-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    needs: [tag, crossbuild]
+    if: ${{ github.event_name == 'push' && needs.tag.outputs.new_tag != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download binaries
+        uses: actions/download-artifact@v8
+        with:
+          pattern: binaries-*
+          path: dist
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.tag.outputs.new_tag }}
+          files: dist/*
+
+  docker:
+    needs: [test, tag, crossbuild]
     if: ${{ !cancelled() && !failure() }}
     runs-on: ubuntu-latest
     permissions:
@@ -58,6 +113,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      - name: Download Linux binaries
+        uses: actions/download-artifact@v8
+        with:
+          pattern: binaries-linux-*
+          path: dist
+          merge-multiple: true
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3

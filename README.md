@@ -30,6 +30,8 @@ docker run --rm -p 44879:44879 ghcr.io/bored-engineer/github-api-proxy:main \
   --listen 0.0.0.0:44879
 ```
 
+Or download a pre-built binary for linux, macOS, or Windows (amd64 or arm64) from the [Releases](https://github.com/bored-engineer/github-api-proxy/releases) page.
+
 ## Usage
 
 ### Basic Usage
