@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -57,6 +58,22 @@ var (
 	)
 )
 
+// listenNetworks are the net.Listen network types recognized as an explicit
+// "network:" prefix on a --listen value; anything else is treated as a plain
+// address with no prefix, defaulting to "tcp".
+var listenNetworks = []string{"tcp", "tcp4", "tcp6", "unix", "unixpacket"}
+
+// splitListenAddr splits a --listen value of the form "[network:]address"
+// into its network and address parts, defaulting network to "tcp" if no
+// recognized network prefix is present (e.g. "127.0.0.1:44879" is a bare
+// address, not a "127.0.0.1" network).
+func splitListenAddr(s string) (network, address string) {
+	if network, address, ok := strings.Cut(s, ":"); ok && slices.Contains(listenNetworks, network) {
+		return network, address
+	}
+	return "tcp", s
+}
+
 // reportRateLimit returns a ghratelimit.Limits.Notify function that records the
 // given rate limit as Prometheus metrics, labeled with clientID, installationID,
 // and hashedToken (whichever apply to the credential type; others left as "").
@@ -80,7 +97,7 @@ func main() {
 	defer cancel()
 
 	apiURL := pflag.String("url", "https://api.github.com/", "GitHub API URL")
-	listenAddr := pflag.String("listen", "127.0.0.1:44879", "Address to listen on")
+	listenAddrs := pflag.StringSlice("listen", []string{"127.0.0.1:44879"}, "Address(es) to listen on, optionally prefixed with 'network:' (e.g. 'unix:/github-api-proxy.sock'); network defaults to 'tcp'")
 	tlsCert := pflag.String("tls-cert", "", "TLS certificate file to use")
 	tlsKey := pflag.String("tls-key", "", "TLS key file to use")
 	pebbleDBPath := pflag.String("pebble-db", "", "Path to PebbleDB to use for caching")
@@ -310,22 +327,35 @@ func main() {
 	mux.Handle("/metrics", promhttp.Handler())
 	mux.Handle("/api/v3/", http.StripPrefix("/api/v3/", proxy))
 
-	// Start the HTTP server.
+	// Bind every requested listener up front so any invalid address is
+	// reported immediately rather than after backgrounding the server.
+	listeners := make([]net.Listener, len(*listenAddrs))
+	for i, listenAddr := range *listenAddrs {
+		network, address := splitListenAddr(listenAddr)
+		listener, err := net.Listen(network, address)
+		if err != nil {
+			log.Fatal().Err(err).Str("network", network).Str("address", address).Msg("net.Listen failed")
+		}
+		listeners[i] = listener
+	}
+
+	// Start the HTTP server on each listener.
 	server := &http.Server{
-		Addr:    *listenAddr,
 		Handler: mux,
 	}
-	go func() {
-		if *tlsCert != "" && *tlsKey != "" {
-			if err := server.ListenAndServeTLS(*tlsCert, *tlsKey); !errors.Is(err, http.ErrServerClosed) {
-				log.Fatal().Err(err).Msg("(*http.Server).ListenAndServeTLS failed")
+	for _, listener := range listeners {
+		go func(listener net.Listener) {
+			if *tlsCert != "" && *tlsKey != "" {
+				if err := server.ServeTLS(listener, *tlsCert, *tlsKey); !errors.Is(err, http.ErrServerClosed) {
+					log.Fatal().Err(err).Msg("(*http.Server).ServeTLS failed")
+				}
+			} else {
+				if err := server.Serve(listener); !errors.Is(err, http.ErrServerClosed) {
+					log.Fatal().Err(err).Msg("(*http.Server).Serve failed")
+				}
 			}
-		} else {
-			if err := server.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
-				log.Fatal().Err(err).Msg("(*http.Server).ListenAndServe failed")
-			}
-		}
-	}()
+		}(listener)
+	}
 
 	// When an interrupt is received, gracefully shut down the HTTP server.
 	<-ctx.Done()
