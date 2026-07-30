@@ -190,7 +190,7 @@ func main() {
 
 	// If credentials were provided, balancing requests across them.
 	if len(*authOAuth) > 0 || len(*authApp) > 0 || len(*authToken) > 0 {
-		var balancing ghratelimit.BalancingTransport
+		var transports []*ghratelimit.Transport
 		// If using OAuth credentials, just use basic auth.
 		for _, params := range *authOAuth {
 			clientID, clientSecret, ok := strings.Cut(params, ":")
@@ -201,7 +201,7 @@ func main() {
 			if err != nil {
 				log.Fatal().Err(err).Str("client_id", clientID).Msg("ghauth.Basic failed")
 			}
-			balancing = append(balancing, &ghratelimit.Transport{
+			transports = append(transports, &ghratelimit.Transport{
 				Base: authTransport,
 				Limits: ghratelimit.Limits{
 					Notify: func(resp *http.Response, resource ghratelimit.Resource, rate *ghratelimit.Rate) {
@@ -225,7 +225,7 @@ func main() {
 			if err != nil {
 				log.Fatal().Err(err).Str("app_id", appID).Msg("ghauth.App failed")
 			}
-			balancing = append(balancing, &ghratelimit.Transport{
+			transports = append(transports, &ghratelimit.Transport{
 				Base: &oauth2.Transport{
 					Base:   newBaseTransport(),
 					Source: ts,
@@ -241,7 +241,7 @@ func main() {
 		for _, token := range *authToken {
 			hashed := sha256.Sum256([]byte(token))
 			hashedToken := base64.StdEncoding.EncodeToString(hashed[:])
-			balancing = append(balancing, &ghratelimit.Transport{
+			transports = append(transports, &ghratelimit.Transport{
 				Base: &oauth2.Transport{
 					Base:   newBaseTransport(),
 					Source: oauth2.StaticTokenSource(ghauth.Token(token)),
@@ -255,14 +255,21 @@ func main() {
 			})
 		}
 		// If RPH is set, wrap each individual transport in a rate-limiting transport.
-		for _, transport := range balancing {
-			transport.Base = ratelimit.New(transport.Base, *rph, ratelimit.Per(time.Hour))
+		for _, t := range transports {
+			t.Base = ratelimit.New(t.Base, *rph, ratelimit.Per(time.Hour))
 		}
 		// Poll the rate limits for each transport.
-		go balancing.Poll(ctx, *rateInterval, proxyURL.ResolveReference(&url.URL{
-			Path: "/rate_limit",
-		}))
-		transport = balancing
+		for _, t := range transports {
+			go t.Poll(ctx, *rateInterval, proxyURL.ResolveReference(&url.URL{
+				Path: "/rate_limit",
+			}))
+		}
+		// Balance requests round-robin across the credentials.
+		roundRobin := make([]http.RoundTripper, len(transports))
+		for i, t := range transports {
+			roundRobin[i] = t
+		}
+		transport = RoundRobin(roundRobin)
 	} else {
 		// If RPH is set, wrap the main transport in a rate-limiting transport.
 		if *rph > 0 {
