@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"time"
 
@@ -44,7 +45,7 @@ var (
 			Help:      "Number of requests remaining in the current rate limit window",
 			Subsystem: "github",
 		},
-		[]string{"client_id", "resource"},
+		[]string{"client_id", "installation_id", "hashed_token", "resource"},
 	)
 	RateLimitReset = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -52,9 +53,23 @@ var (
 			Help:      "Unix timestamp when the current rate limit window resets",
 			Subsystem: "github",
 		},
-		[]string{"client_id", "resource"},
+		[]string{"client_id", "installation_id", "hashed_token", "resource"},
 	)
 )
+
+// reportRateLimit returns a ghratelimit.Limits.Notify function that records the
+// given rate limit as Prometheus metrics, labeled with clientID, installationID,
+// and hashedToken (whichever apply to the credential type; others left as "").
+// If resourceTypes is non-empty, only resources in that list are reported.
+func reportRateLimit(clientID, installationID, hashedToken string, resourceTypes []string) func(*http.Response, ghratelimit.Resource, *ghratelimit.Rate) {
+	return func(resp *http.Response, resource ghratelimit.Resource, rate *ghratelimit.Rate) {
+		if len(resourceTypes) > 0 && !slices.Contains(resourceTypes, resource.String()) {
+			return
+		}
+		RateLimitRemaining.WithLabelValues(clientID, installationID, hashedToken, resource.String()).Set(float64(rate.Remaining))
+		RateLimitReset.WithLabelValues(clientID, installationID, hashedToken, resource.String()).Set(float64(rate.Reset))
+	}
+}
 
 func main() {
 	// Initialize zerolog
@@ -84,6 +99,7 @@ func main() {
 	authToken := pflag.StringSlice("auth-token", nil, "GitHub personal access tokens for GitHub API authentication")
 	rph := pflag.Int("rph", 0, "maximum requests per hour (per authentication token)")
 	rateInterval := pflag.Duration("rate-interval", 60*time.Second, "Interval for rate limit checks")
+	rateResources := pflag.StringSlice("rate-resource", []string{"core", "graphql"}, "Resource types to report rate limit metrics for (empty means report all)")
 	srcIPs := pflag.StringSlice("src-ip", nil, "Source IP addresses to balance outgoing requests across (round-robin)")
 	walltimeLimit := pflag.Duration("walltime-limit", 90*time.Second, "Maximum cumulative request walltime permitted per --walltime-period, per authenticated token (and per --src-ip, if set)")
 	walltimePeriod := pflag.Duration("walltime-period", 60*time.Second, "Interval over which --walltime-limit is enforced")
@@ -204,10 +220,7 @@ func main() {
 			balancing = append(balancing, &ghratelimit.Transport{
 				Base: authTransport,
 				Limits: ghratelimit.Limits{
-					Notify: func(resp *http.Response, resource ghratelimit.Resource, rate *ghratelimit.Rate) {
-						RateLimitRemaining.WithLabelValues(clientID, resource.String()).Set(float64(rate.Remaining))
-						RateLimitReset.WithLabelValues(clientID, resource.String()).Set(float64(rate.Reset))
-					},
+					Notify: reportRateLimit(clientID, "", "", *rateResources),
 				},
 			})
 		}
@@ -231,10 +244,7 @@ func main() {
 					Source: ts,
 				},
 				Limits: ghratelimit.Limits{
-					Notify: func(resp *http.Response, resource ghratelimit.Resource, rate *ghratelimit.Rate) {
-						RateLimitRemaining.WithLabelValues(appID+":"+installationID, resource.String()).Set(float64(rate.Remaining))
-						RateLimitReset.WithLabelValues(appID+":"+installationID, resource.String()).Set(float64(rate.Reset))
-					},
+					Notify: reportRateLimit(appID, installationID, "", *rateResources),
 				},
 			})
 		}
@@ -247,10 +257,7 @@ func main() {
 					Source: oauth2.StaticTokenSource(ghauth.Token(token)),
 				},
 				Limits: ghratelimit.Limits{
-					Notify: func(resp *http.Response, resource ghratelimit.Resource, rate *ghratelimit.Rate) {
-						RateLimitRemaining.WithLabelValues(hashedToken, resource.String()).Set(float64(rate.Remaining))
-						RateLimitReset.WithLabelValues(hashedToken, resource.String()).Set(float64(rate.Reset))
-					},
+					Notify: reportRateLimit("", "", hashedToken, *rateResources),
 				},
 			})
 		}
