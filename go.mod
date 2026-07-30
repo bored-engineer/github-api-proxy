@@ -13,7 +13,6 @@ require (
 	github.com/bored-engineer/github-conditional-http-transport/s3 v0.0.0-20260121230238-d9cbf4406613
 	github.com/bored-engineer/github-rate-limit-http-transport v0.0.0-20260103051320-ca24a62ee8e9
 	github.com/bored-engineer/ratelimit-transport v0.0.0-20260112232851-ff2f1f464758
-	github.com/bored-engineer/walltime-transport v0.0.0-20260721054115-4e08f91b7d85
 	github.com/prometheus/client_golang v1.23.2
 	github.com/redis/go-redis/v9 v9.17.2
 	github.com/rs/zerolog v1.34.0
@@ -75,7 +74,6 @@ require (
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	golang.org/x/exp v0.0.0-20260112195511-716be5621a96 // indirect
 	golang.org/x/text v0.33.0 // indirect
-	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
 
