@@ -330,13 +330,13 @@ func main() {
 	// Bind every requested listener up front so any invalid address is
 	// reported immediately rather than after backgrounding the server.
 	listeners := make([]net.Listener, len(*listenAddrs))
-	for i, listenAddr := range *listenAddrs {
+	for idx, listenAddr := range *listenAddrs {
 		network, address := splitListenAddr(listenAddr)
 		listener, err := net.Listen(network, address)
 		if err != nil {
 			log.Fatal().Err(err).Str("network", network).Str("address", address).Msg("net.Listen failed")
 		}
-		listeners[i] = listener
+		listeners[idx] = listener
 	}
 
 	// Start the HTTP server on each listener.
@@ -344,7 +344,7 @@ func main() {
 		Handler: mux,
 	}
 	for _, listener := range listeners {
-		go func(listener net.Listener) {
+		go func() {
 			if *tlsCert != "" && *tlsKey != "" {
 				if err := server.ServeTLS(listener, *tlsCert, *tlsKey); !errors.Is(err, http.ErrServerClosed) {
 					log.Fatal().Err(err).Msg("(*http.Server).ServeTLS failed")
@@ -354,7 +354,7 @@ func main() {
 					log.Fatal().Err(err).Msg("(*http.Server).Serve failed")
 				}
 			}
-		}(listener)
+		}()
 	}
 
 	// When an interrupt is received, gracefully shut down the HTTP server.
