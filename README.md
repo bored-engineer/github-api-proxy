@@ -77,25 +77,25 @@ The proxy supports multiple authentication methods that can be used simultaneous
 
 #### Pebble
 ```bash
-./github-api-proxy --pebble-db /path/to/cache.db
+./github-api-proxy --cache-pebble-db /path/to/cache.db
 ```
 
 #### BoltDB
 ```bash
-./github-api-proxy --bbolt-db /path/to/cache.db --bbolt-bucket my-bucket
+./github-api-proxy --cache-bbolt-db /path/to/cache.db --cache-bbolt-bucket my-bucket
 ```
 
 #### Redis
 ```bash
-./github-api-proxy --redis-addr 127.0.0.1:6379
+./github-api-proxy --cache-redis-addr 127.0.0.1:6379
 ```
 
 #### S3
 ```bash
 ./github-api-proxy \
-  --s3-bucket github-rest-api-proxy \
-  --s3-region us-west-2 \
-  --s3-prefix cache/
+  --cache-s3-bucket github-rest-api-proxy \
+  --cache-s3-region us-west-2 \
+  --cache-s3-prefix cache/
 ```
 
 ### Rate Limiting
@@ -136,17 +136,17 @@ The proxy supports multiple authentication methods that can be used simultaneous
 | `--rate-reserve` | Proactively reserve rate limit capacity for in-flight requests before response headers are parsed | `true` |
 | `--rate-spoof` | Return a synthetic 429 response instead of forwarding requests once a credential's rate limit is exhausted | `true` |
 | `--src-ip` | Source IP addresses to balance outgoing requests across (round-robin) | (none) |
-| `--bbolt-db` | Path to BoltDB for caching | (disabled) |
-| `--bbolt-bucket` | BoltDB bucket name | `github-api-proxy` |
-| `--pebble-db` | Path to PebbleDB for caching | (disabled) |
-| `--s3-bucket` | S3 bucket for caching | (disabled) |
-| `--s3-region` | S3 region | (AWS default) |
-| `--s3-endpoint` | S3 endpoint (for MinIO, etc.) | (AWS default) |
-| `--s3-prefix` | S3 key prefix | (none) |
-| `--redis-addr` | Redis address for caching | (disabled) |
-| `--redis-username` | Redis username | (none) |
-| `--redis-password` | Redis password | (none) |
-| `--redis-db` | Redis database number | `0` |
+| `--cache-bbolt-db` | Path to BoltDB for caching | (disabled) |
+| `--cache-bbolt-bucket` | BoltDB bucket name | `github-api-proxy` |
+| `--cache-pebble-db` | Path to PebbleDB for caching | (disabled) |
+| `--cache-s3-bucket` | S3 bucket for caching | (disabled) |
+| `--cache-s3-region` | S3 region | (AWS default) |
+| `--cache-s3-endpoint` | S3 endpoint (for MinIO, etc.) | (AWS default) |
+| `--cache-s3-prefix` | S3 key prefix | (none) |
+| `--cache-redis-addr` | Redis address for caching | (disabled) |
+| `--cache-redis-username` | Redis username | (none) |
+| `--cache-redis-password` | Redis password | (none) |
+| `--cache-redis-db` | Redis database number | `0` |
 
 ## API Endpoints
 
