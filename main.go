@@ -119,8 +119,10 @@ func main() {
 	rateReserve := pflag.Bool("rate-reserve", true, "Proactively reserve rate limit capacity for in-flight requests before response headers are parsed")
 	rateSpoof := pflag.Bool("rate-spoof", true, "Return a synthetic 429 response instead of forwarding requests once a credential's rate limit is exhausted")
 	srcIPs := pflag.StringSlice("src-ip", nil, "Source IP addresses to balance outgoing requests across (round-robin)")
-	retryMax := pflag.Int("retry-max", 2, "maximum retries for requests without a body that fail with a network error or a 429/5xx status code (0 disables retries)")
-	rateRetry := pflag.Bool("rate-retry", true, "retry 429 responses until the rate limit resets, instead of counting them against --retry-max")
+	retries := pflag.Int("retries", 2, "maximum retries for requests without a body that fail with a network error or a 429/5xx status code (0 disables retries)")
+	retryWait := pflag.Duration("retry-wait", 250*time.Millisecond, "initial backoff delay between retries (doubles each attempt, subject to --retry-wait-max)")
+	retryWaitMax := pflag.Duration("retry-wait-max", 30*time.Second, "maximum backoff delay between retries")
+	rateRetry := pflag.Bool("rate-retry", true, "retry 429 responses until Retry-After clears, instead of counting them against --retries")
 	pflag.Parse()
 
 	proxyURL, err := url.Parse(*apiURL)
@@ -291,8 +293,8 @@ func main() {
 	// Retry requests that fail with a network error or a 429/5xx status,
 	// after balancing/rate-limiting so each attempt can land on a
 	// different source IP or credential.
-	if *retryMax > 0 || *rateRetry {
-		transport = &RetryTransport{Base: transport, MaxRetries: *retryMax, RateRetry: *rateRetry}
+	if *retries > 0 || *rateRetry {
+		transport = &RetryTransport{Base: transport, MaxRetries: *retries, RateRetry: *rateRetry, Wait: *retryWait, MaxWait: *retryWaitMax}
 	}
 
 	// Setup the reverse proxy.

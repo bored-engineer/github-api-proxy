@@ -24,55 +24,27 @@ func isRetryableError(err error) bool {
 	return err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
 }
 
-// rateLimitReset returns the duration until the rate limit in resp's
-// X-RateLimit-Reset header (a Unix timestamp) resets, or false if the
-// header is missing or invalid.
-func rateLimitReset(resp *http.Response) (time.Duration, bool) {
-	v := resp.Header.Get("X-RateLimit-Reset")
-	if v == "" {
-		return 0, false
-	}
-	sec, err := strconv.ParseInt(v, 10, 64)
-	if err != nil {
-		return 0, false
-	}
-	if d := time.Until(time.Unix(sec, 0)); d > 0 {
-		return d, true
-	}
-	return 0, true
-}
-
-// retryDelay returns how long to wait before the next attempt. If
-// untilReset is true and resp has an X-RateLimit-Reset header, it waits
-// until that reset time; otherwise it honors a Retry-After header if the
-// response provided one (in seconds), falling back to capped exponential
-// backoff with full jitter.
-func retryDelay(attempt int, resp *http.Response, untilReset bool) time.Duration {
+// retryDelay returns how long to wait before the next attempt, honoring a
+// Retry-After header if the response provided one (in seconds), otherwise
+// falling back to exponential backoff (starting at wait, doubling each
+// attempt, capped at max) with full jitter.
+func retryDelay(attempt int, resp *http.Response, wait, max time.Duration) time.Duration {
 	if resp != nil {
-		if untilReset {
-			if d, ok := rateLimitReset(resp); ok {
-				return d
-			}
-		}
 		if v := resp.Header.Get("Retry-After"); v != "" {
 			if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
 				return time.Duration(secs) * time.Second
 			}
 		}
 	}
-	const (
-		base = 250 * time.Millisecond
-		cap_ = 30 * time.Second
-	)
-	backoff := base << attempt
-	if backoff <= 0 || backoff > cap_ {
-		backoff = cap_
+	backoff := wait << attempt
+	if backoff <= 0 || backoff > max {
+		backoff = max
 	}
 	return time.Duration(rand.Int64N(int64(backoff)))
 }
 
 // RetryTransport retries requests that fail with a transient network error
-// or a retryable status code (429, or 5xx other than 501), using capped
+// or a retryable status code (429, or 5xx other than 501), using
 // exponential backoff with jitter, honoring Retry-After when present.
 //
 // Requests with a body are never retried: safely replaying one would
@@ -82,10 +54,13 @@ type RetryTransport struct {
 	Base       http.RoundTripper
 	MaxRetries int
 	// RateRetry, if true, retries 429 Too Many Requests responses until
-	// the rate limit resets (per X-RateLimit-Reset, falling back to
-	// Retry-After/backoff if absent), without counting against
-	// MaxRetries or giving up.
+	// Retry-After (falling back to backoff if absent) clears, without
+	// counting against MaxRetries or giving up.
 	RateRetry bool
+	// Wait is the initial backoff delay (before jitter/doubling).
+	Wait time.Duration
+	// MaxWait caps the backoff delay.
+	MaxWait time.Duration
 }
 
 func (t *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -112,7 +87,7 @@ func (t *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			return resp, err
 		}
 
-		timer := time.NewTimer(retryDelay(attempt, resp, rateLimited))
+		timer := time.NewTimer(retryDelay(attempt, resp, t.Wait, t.MaxWait))
 		attempt++
 		if !rateLimited {
 			retries++
