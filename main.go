@@ -99,21 +99,21 @@ func main() {
 	listenAddrs := pflag.StringSlice("listen", []string{"127.0.0.1:44879"}, "Address(es) to listen on, optionally prefixed with 'network:' (e.g. 'unix:/github-api-proxy.sock'); network defaults to 'tcp'")
 	tlsCert := pflag.String("tls-cert", "", "TLS certificate file to use")
 	tlsKey := pflag.String("tls-key", "", "TLS key file to use")
-	pebbleDBPath := pflag.String("pebble-db", "", "Path to PebbleDB to use for caching")
-	boltDBPath := pflag.String("bbolt-db", "", "Path to BoltDB to use for caching")
-	boltDBBucket := pflag.String("bbolt-bucket", "github-api-proxy", "BoltDB bucket to use for caching")
-	s3Bucket := pflag.String("s3-bucket", "", "S3 bucket to use")
-	s3Region := pflag.String("s3-region", "", "S3 region to use")
-	s3Endpoint := pflag.String("s3-endpoint", "", "S3 endpoint to use")
-	s3Prefix := pflag.String("s3-prefix", "", "S3 prefix to use")
-	redisAddr := pflag.String("redis-addr", "", "Redis address to use")
-	redisUsername := pflag.String("redis-username", "", "Redis username to use")
-	redisPassword := pflag.String("redis-password", "", "Redis password to use")
-	redisDB := pflag.Int("redis-db", 0, "Redis database to use")
+	pebbleDBPath := pflag.String("cache-pebble-db", "", "Path to PebbleDB to use for caching")
+	boltDBPath := pflag.String("cache-bbolt-db", "", "Path to BoltDB to use for caching")
+	boltDBBucket := pflag.String("cache-bbolt-bucket", "github-api-proxy", "BoltDB bucket to use for caching")
+	s3Bucket := pflag.String("cache-s3-bucket", "", "S3 bucket to use")
+	s3Region := pflag.String("cache-s3-region", "", "S3 region to use")
+	s3Endpoint := pflag.String("cache-s3-endpoint", "", "S3 endpoint to use")
+	s3Prefix := pflag.String("cache-s3-prefix", "", "S3 prefix to use")
+	redisAddr := pflag.String("cache-redis-addr", "", "Redis address to use")
+	redisUsername := pflag.String("cache-redis-username", "", "Redis username to use")
+	redisPassword := pflag.String("cache-redis-password", "", "Redis password to use")
+	redisDB := pflag.Int("cache-redis-db", 0, "Redis database to use")
 	authOAuth := pflag.StringSlice("auth-oauth", nil, "OAuth clients for GitHub API authentication in the format 'client_id:client_secret'")
 	authApp := pflag.StringSlice("auth-app", nil, "GitHub App clients for GitHub API authentication in the format 'client_id:installation_id:private_key'")
 	authToken := pflag.StringSlice("auth-token", nil, "GitHub personal access tokens for GitHub API authentication")
-	rph := pflag.Int("rph", 0, "maximum requests per hour (per authentication token)")
+	rph := pflag.Int("rph", 0, "maximum requests per hour, shared globally across all authentication tokens")
 	rateInterval := pflag.Duration("rate-interval", 60*time.Second, "Interval for rate limit checks")
 	rateResources := pflag.StringSlice("rate-resources", []string{"core", "graphql"}, "Resource types to report rate limit metrics for (empty means report all)")
 	rateReserve := pflag.Bool("rate-reserve", true, "Proactively reserve rate limit capacity for in-flight requests before response headers are parsed")
@@ -274,25 +274,23 @@ func main() {
 				Spoof:   *rateSpoof,
 			})
 		}
-		// If RPH is set, wrap each individual transport in a rate-limiting transport.
-		for _, t := range balancing {
-			t.Base = ratelimit.New(t.Base, *rph, ratelimit.Per(time.Hour))
-		}
 		// Poll the rate limits for each transport.
 		go balancing.Poll(ctx, *rateInterval, proxyURL.ResolveReference(&url.URL{
 			Path: "/rate_limit",
 		}))
 		transport = balancing
-	} else {
-		// If RPH is set, wrap the main transport in a rate-limiting transport.
-		if *rph > 0 {
-			transport = ratelimit.New(transport, *rph, ratelimit.Per(time.Hour))
-		}
+	}
+
+	// If RPH is set, apply a single rate limit shared across all
+	// credentials/source IPs (rather than one budget per credential), so
+	// the configured throughput is a global cap on the proxy as a whole.
+	if *rph > 0 {
+		transport = ratelimit.New(transport, *rph, ratelimit.Per(time.Hour))
 	}
 
 	// Retry requests that fail with a network error or a 429/5xx status,
-	// after balancing/rate-limiting so each attempt can land on a
-	// different source IP or credential.
+	// after balancing/rate-limiting so each attempt (including retries)
+	// counts against the same global rate limit.
 	if *retries > 0 || *rateRetry {
 		transport = &RetryTransport{Base: transport, MaxRetries: *retries, RateRetry: *rateRetry, Wait: *retryWait, MaxWait: *retryWaitMax}
 	}
