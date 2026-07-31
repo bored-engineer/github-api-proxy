@@ -113,7 +113,7 @@ func main() {
 	authOAuth := pflag.StringSlice("auth-oauth", nil, "OAuth clients for GitHub API authentication in the format 'client_id:client_secret'")
 	authApp := pflag.StringSlice("auth-app", nil, "GitHub App clients for GitHub API authentication in the format 'app_id:installation_id:private_key'")
 	authToken := pflag.StringSlice("auth-token", nil, "GitHub personal access tokens for GitHub API authentication")
-	rph := pflag.Int("rph", 0, "maximum requests per hour (per authentication token)")
+	rph := pflag.Int("rph", 0, "maximum requests per hour, shared globally across all authentication tokens")
 	rateInterval := pflag.Duration("rate-interval", 60*time.Second, "Interval for rate limit checks")
 	rateResources := pflag.StringSlice("rate-resources", []string{"core", "graphql"}, "Resource types to report rate limit metrics for (empty means report all)")
 	rateReserve := pflag.Bool("rate-reserve", true, "Proactively reserve rate limit capacity for in-flight requests before response headers are parsed")
@@ -274,25 +274,23 @@ func main() {
 				Spoof:   *rateSpoof,
 			})
 		}
-		// If RPH is set, wrap each individual transport in a rate-limiting transport.
-		for _, t := range balancing {
-			t.Base = ratelimit.New(t.Base, *rph, ratelimit.Per(time.Hour))
-		}
 		// Poll the rate limits for each transport.
 		go balancing.Poll(ctx, *rateInterval, proxyURL.ResolveReference(&url.URL{
 			Path: "/rate_limit",
 		}))
 		transport = balancing
-	} else {
-		// If RPH is set, wrap the main transport in a rate-limiting transport.
-		if *rph > 0 {
-			transport = ratelimit.New(transport, *rph, ratelimit.Per(time.Hour))
-		}
+	}
+
+	// If RPH is set, apply a single rate limit shared across all
+	// credentials/source IPs (rather than one budget per credential), so
+	// the configured throughput is a global cap on the proxy as a whole.
+	if *rph > 0 {
+		transport = ratelimit.New(transport, *rph, ratelimit.Per(time.Hour))
 	}
 
 	// Retry requests that fail with a network error or a 429/5xx status,
-	// after balancing/rate-limiting so each attempt can land on a
-	// different source IP or credential.
+	// after balancing/rate-limiting so each attempt (including retries)
+	// counts against the same global rate limit.
 	if *retries > 0 || *rateRetry {
 		transport = &RetryTransport{Base: transport, MaxRetries: *retries, RateRetry: *rateRetry, Wait: *retryWait, MaxWait: *retryWaitMax}
 	}

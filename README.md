@@ -101,7 +101,7 @@ The proxy supports multiple authentication methods that can be used simultaneous
 ### Rate Limiting
 
 ```bash
-# Limit to 5000 requests per hour per authentication token
+# Limit to 5000 requests per hour, shared globally across all authentication tokens
 ./github-api-proxy --rph 5000
 ```
 
@@ -130,7 +130,7 @@ The proxy supports multiple authentication methods that can be used simultaneous
 | `--auth-token` | GitHub personal access token | (none) |
 | `--auth-oauth` | OAuth client ID/secret (format: `client_id:client_secret`) | (none) |
 | `--auth-app` | GitHub App clients (format: `app_id:installation_id:private_key`) | (none) |
-| `--rph` | Maximum requests per second per auth token | (unlimited) |
+| `--rph` | Maximum requests per hour, shared globally across all authentication tokens | (unlimited) |
 | `--rate-interval` | Interval for rate limit checks | `1m0s` |
 | `--rate-resources` | Resource types to report rate limit metrics for (empty means report all) | `core,graphql` |
 | `--rate-reserve` | Proactively reserve rate limit capacity for in-flight requests before response headers are parsed | `true` |
