@@ -56,7 +56,7 @@ The proxy supports multiple authentication methods that can be used simultaneous
 
 #### GitHub Apps
 ```bash
-./github-api-proxy --auth-app "app_id:installation_id:private_key"
+./github-api-proxy --auth-app "client_id:installation_id:private_key"
 ```
 
 #### Multiple Authentication Methods
@@ -129,7 +129,7 @@ The proxy supports multiple authentication methods that can be used simultaneous
 | `--tls-key` | TLS key file | (disabled) |
 | `--auth-token` | GitHub personal access token | (none) |
 | `--auth-oauth` | OAuth client ID/secret (format: `client_id:client_secret`) | (none) |
-| `--auth-app` | GitHub App clients (format: `app_id:installation_id:private_key`) | (none) |
+| `--auth-app` | GitHub App clients (format: `client_id:installation_id:private_key`) | (none) |
 | `--rph` | Maximum requests per hour, shared globally across all authentication tokens | (unlimited) |
 | `--rate-interval` | Interval for rate limit checks | `1m0s` |
 | `--rate-resources` | Resource types to report rate limit metrics for (empty means report all) | `core,graphql` |

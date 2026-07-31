@@ -111,7 +111,7 @@ func main() {
 	redisPassword := pflag.String("cache-redis-password", "", "Redis password to use")
 	redisDB := pflag.Int("cache-redis-db", 0, "Redis database to use")
 	authOAuth := pflag.StringSlice("auth-oauth", nil, "OAuth clients for GitHub API authentication in the format 'client_id:client_secret'")
-	authApp := pflag.StringSlice("auth-app", nil, "GitHub App clients for GitHub API authentication in the format 'app_id:installation_id:private_key'")
+	authApp := pflag.StringSlice("auth-app", nil, "GitHub App clients for GitHub API authentication in the format 'client_id:installation_id:private_key'")
 	authToken := pflag.StringSlice("auth-token", nil, "GitHub personal access tokens for GitHub API authentication")
 	rph := pflag.Int("rph", 0, "maximum requests per hour, shared globally across all authentication tokens")
 	rateInterval := pflag.Duration("rate-interval", 60*time.Second, "Interval for rate limit checks")
@@ -235,7 +235,7 @@ func main() {
 		}
 		// If using GitHub App credentials, use the GitHub App transport.
 		for _, appParams := range *authApp {
-			appID, appParams, ok := strings.Cut(appParams, ":")
+			clientID, appParams, ok := strings.Cut(appParams, ":")
 			if !ok {
 				log.Fatal().Str("params", appParams).Msg("invalid GitHub App")
 			}
@@ -243,9 +243,9 @@ func main() {
 			if !ok {
 				log.Fatal().Str("params", appParams).Msg("invalid GitHub App")
 			}
-			ts, err := ghauth.App(ctx, appID, installationID, privateKey)
+			ts, err := ghauth.App(ctx, clientID, installationID, privateKey)
 			if err != nil {
-				log.Fatal().Err(err).Str("app_id", appID).Msg("ghauth.App failed")
+				log.Fatal().Err(err).Str("client_id", clientID).Msg("ghauth.App failed")
 			}
 			balancing = append(balancing, &ghratelimit.Transport{
 				Base: &oauth2.Transport{
@@ -253,7 +253,7 @@ func main() {
 					Source: ts,
 				},
 				Limits: ghratelimit.Limits{
-					Notify: reportRateLimit(appID, installationID, "", *rateResources),
+					Notify: reportRateLimit(clientID, installationID, "", *rateResources),
 				},
 				Reserve: *rateReserve,
 				Spoof:   *rateSpoof,
