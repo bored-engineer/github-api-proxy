@@ -119,15 +119,6 @@ The proxy supports multiple authentication methods that can be used simultaneous
 ./github-api-proxy --src-ip 203.0.113.10 --src-ip 203.0.113.11
 ```
 
-### Walltime Throttling
-
-Each authenticated token (and, if `--src-ip` is set, each `(source IP, token)` pair) is throttled to a maximum amount of cumulative in-flight request time per interval, independent of the GitHub-reported rate limit.
-
-```bash
-# Allow at most 45s of cumulative request walltime per 60s, per token
-./github-api-proxy --auth-token ghp_xxx --walltime-limit 45s --walltime-period 60s
-```
-
 ## Configuration Options
 
 | Flag | Description | Default |
@@ -142,10 +133,6 @@ Each authenticated token (and, if `--src-ip` is set, each `(source IP, token)` p
 | `--rph` | Maximum requests per second per auth token | (unlimited) |
 | `--rate-interval` | Interval for rate limit checks | `1m0s` |
 | `--src-ip` | Source IP addresses to balance outgoing requests across (round-robin) | (none) |
-| `--walltime-limit` | Maximum cumulative request walltime per `--walltime-period`, per authenticated token (and per `--src-ip`, if set) | `1m30s` |
-| `--walltime-period` | Interval over which `--walltime-limit` is enforced | `1m0s` |
-| `--walltime-estimate` | Pessimistic upper bound on request duration reserved before each request starts | `10s` |
-| `--walltime-offset` | Amount subtracted from each request's measured walltime before it's charged | `0s` |
 | `--bbolt-db` | Path to BoltDB for caching | (disabled) |
 | `--bbolt-bucket` | BoltDB bucket name | `github-api-proxy` |
 | `--pebble-db` | Path to PebbleDB for caching | (disabled) |

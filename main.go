@@ -27,7 +27,6 @@ import (
 	s3storage "github.com/bored-engineer/github-conditional-http-transport/s3"
 	ghratelimit "github.com/bored-engineer/github-rate-limit-http-transport"
 	ratelimit "github.com/bored-engineer/ratelimit-transport"
-	walltime "github.com/bored-engineer/walltime-transport"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -118,10 +117,6 @@ func main() {
 	rateInterval := pflag.Duration("rate-interval", 60*time.Second, "Interval for rate limit checks")
 	rateResources := pflag.StringSlice("rate-resource", []string{"core", "graphql"}, "Resource types to report rate limit metrics for (empty means report all)")
 	srcIPs := pflag.StringSlice("src-ip", nil, "Source IP addresses to balance outgoing requests across (round-robin)")
-	walltimeLimit := pflag.Duration("walltime-limit", 90*time.Second, "Maximum cumulative request walltime permitted per --walltime-period, per authenticated token (and per --src-ip, if set)")
-	walltimePeriod := pflag.Duration("walltime-period", 60*time.Second, "Interval over which --walltime-limit is enforced")
-	walltimeEstimate := pflag.Duration("walltime-estimate", 10*time.Second, "Pessimistic upper bound on request duration reserved before each request starts")
-	walltimeOffset := pflag.Duration("walltime-offset", 0, "Amount subtracted from each request's measured walltime before it's charged")
 	pflag.Parse()
 
 	proxyURL, err := url.Parse(*apiURL)
@@ -203,22 +198,11 @@ func main() {
 	// The default transport balances requests across all source IPs.
 	var transport http.RoundTripper = RoundRobin(chains)
 
-	// newBaseTransport returns a fresh walltime-throttled transport for
-	// a single authenticated token: one walltime.Transport instance per
-	// source IP (or a single instance if no --src-ip was given), balanced
-	// round-robin per request across them.
+	// newBaseTransport returns a transport for a single authenticated
+	// token, balanced round-robin per request across each source IP's
+	// chain (or a single chain if no --src-ip was given).
 	newBaseTransport := func() http.RoundTripper {
-		instances := make([]http.RoundTripper, len(chains))
-		for idx, chain := range chains {
-			instances[idx] = walltime.New(
-				walltime.Per(*walltimeLimit, *walltimePeriod),
-				*walltimeLimit,
-				walltime.WithTransport(chain),
-				walltime.WithEstimate(*walltimeEstimate),
-				walltime.WithOffset(*walltimeOffset),
-			)
-		}
-		return RoundRobin(instances)
+		return RoundRobin(chains)
 	}
 
 	// If credentials were provided, balancing requests across them.
