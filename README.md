@@ -132,6 +132,8 @@ The proxy supports multiple authentication methods that can be used simultaneous
 | `--auth-app` | GitHub App clients (format: `app_id:installation_id:private_key`) | (none) |
 | `--rph` | Maximum requests per second per auth token | (unlimited) |
 | `--rate-interval` | Interval for rate limit checks | `1m0s` |
+| `--rate-resources` | Resource types to report rate limit metrics for (empty means report all) | `core,graphql` |
+| `--rate-reserve` | Proactively reserve rate limit capacity for in-flight requests before response headers are parsed | `true` |
 | `--src-ip` | Source IP addresses to balance outgoing requests across (round-robin) | (none) |
 | `--bbolt-db` | Path to BoltDB for caching | (disabled) |
 | `--bbolt-bucket` | BoltDB bucket name | `github-api-proxy` |
