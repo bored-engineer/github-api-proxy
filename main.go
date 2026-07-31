@@ -117,6 +117,7 @@ func main() {
 	rateInterval := pflag.Duration("rate-interval", 60*time.Second, "Interval for rate limit checks")
 	rateResources := pflag.StringSlice("rate-resources", []string{"core", "graphql"}, "Resource types to report rate limit metrics for (empty means report all)")
 	rateReserve := pflag.Bool("rate-reserve", true, "Proactively reserve rate limit capacity for in-flight requests before response headers are parsed")
+	rateSpoof := pflag.Bool("rate-spoof", true, "Return a synthetic 429 response instead of forwarding requests once a credential's rate limit is exhausted")
 	srcIPs := pflag.StringSlice("src-ip", nil, "Source IP addresses to balance outgoing requests across (round-robin)")
 	pflag.Parse()
 
@@ -225,6 +226,7 @@ func main() {
 					Notify: reportRateLimit(clientID, "", "", *rateResources),
 				},
 				Reserve: *rateReserve,
+				Spoof:   *rateSpoof,
 			})
 		}
 		// If using GitHub App credentials, use the GitHub App transport.
@@ -250,6 +252,7 @@ func main() {
 					Notify: reportRateLimit(appID, installationID, "", *rateResources),
 				},
 				Reserve: *rateReserve,
+				Spoof:   *rateSpoof,
 			})
 		}
 		for _, token := range *authToken {
@@ -264,6 +267,7 @@ func main() {
 					Notify: reportRateLimit("", "", hashedToken, *rateResources),
 				},
 				Reserve: *rateReserve,
+				Spoof:   *rateSpoof,
 			})
 		}
 		// If RPH is set, wrap each individual transport in a rate-limiting transport.

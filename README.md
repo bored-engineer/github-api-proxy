@@ -134,6 +134,7 @@ The proxy supports multiple authentication methods that can be used simultaneous
 | `--rate-interval` | Interval for rate limit checks | `1m0s` |
 | `--rate-resources` | Resource types to report rate limit metrics for (empty means report all) | `core,graphql` |
 | `--rate-reserve` | Proactively reserve rate limit capacity for in-flight requests before response headers are parsed | `true` |
+| `--rate-spoof` | Return a synthetic 429 response instead of forwarding requests once a credential's rate limit is exhausted | `true` |
 | `--src-ip` | Source IP addresses to balance outgoing requests across (round-robin) | (none) |
 | `--bbolt-db` | Path to BoltDB for caching | (disabled) |
 | `--bbolt-bucket` | BoltDB bucket name | `github-api-proxy` |
