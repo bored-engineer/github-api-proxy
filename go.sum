@@ -62,8 +62,8 @@ github.com/bored-engineer/github-conditional-http-transport/redis v0.0.0-2026012
 github.com/bored-engineer/github-conditional-http-transport/redis v0.0.0-20260121230238-d9cbf4406613/go.mod h1:jbDynC9wKQ6ujikDdvsh2zP3+kqwdk39qhabvfPMxdI=
 github.com/bored-engineer/github-conditional-http-transport/s3 v0.0.0-20260121230238-d9cbf4406613 h1:u+5+6jKFbGnIdF+cci43K7yHj/khAPVMM6fycJL7fic=
 github.com/bored-engineer/github-conditional-http-transport/s3 v0.0.0-20260121230238-d9cbf4406613/go.mod h1:jklJAbARTAuixEyRAsV+5aG08O/jYzFYhrh/x+ecSoU=
-github.com/bored-engineer/github-rate-limit-http-transport v0.0.0-20260103051320-ca24a62ee8e9 h1:UOzAK4UA0Bj9NTeCYjFyvPnmlP0R7+DPs12b9cnGucA=
-github.com/bored-engineer/github-rate-limit-http-transport v0.0.0-20260103051320-ca24a62ee8e9/go.mod h1:PrUQEhWKA4UztBu/NSNKVVdndT/JnttdWsyJVkKTjuE=
+github.com/bored-engineer/github-rate-limit-http-transport v0.0.0-20260731054516-a01396440cdf h1:bNv51fA+qv9uyiwjIyKm6/KQUOdPT0KG2PXgD/1a9Qw=
+github.com/bored-engineer/github-rate-limit-http-transport v0.0.0-20260731054516-a01396440cdf/go.mod h1:PrUQEhWKA4UztBu/NSNKVVdndT/JnttdWsyJVkKTjuE=
 github.com/bored-engineer/ratelimit-transport v0.0.0-20260112232851-ff2f1f464758 h1:PhJKeBvAIXLDBy2Xxv9ecNTkXeAaTwpbmtm8uhS017Y=
 github.com/bored-engineer/ratelimit-transport v0.0.0-20260112232851-ff2f1f464758/go.mod h1:07TPmH6A0mwcdXBp1vxFrHFmRf9/ixIh8foexKvJYNQ=
 github.com/bsm/ginkgo/v2 v2.12.0 h1:Ny8MWAHyOepLGlLKYmXG4IEkioBysk6GpaRTLC8zwWs=
