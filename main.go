@@ -115,7 +115,8 @@ func main() {
 	authToken := pflag.StringSlice("auth-token", nil, "GitHub personal access tokens for GitHub API authentication")
 	rph := pflag.Int("rph", 0, "maximum requests per hour (per authentication token)")
 	rateInterval := pflag.Duration("rate-interval", 60*time.Second, "Interval for rate limit checks")
-	rateResources := pflag.StringSlice("rate-resource", []string{"core", "graphql"}, "Resource types to report rate limit metrics for (empty means report all)")
+	rateResources := pflag.StringSlice("rate-resources", []string{"core", "graphql"}, "Resource types to report rate limit metrics for (empty means report all)")
+	rateReserve := pflag.Bool("rate-reserve", true, "Proactively reserve rate limit capacity for in-flight requests before response headers are parsed")
 	rateSpoof := pflag.Bool("rate-spoof", true, "Return a synthetic 429 response instead of forwarding requests once a credential's rate limit is exhausted")
 	srcIPs := pflag.StringSlice("src-ip", nil, "Source IP addresses to balance outgoing requests across (round-robin)")
 	pflag.Parse()
@@ -208,7 +209,7 @@ func main() {
 
 	// If credentials were provided, balancing requests across them.
 	if len(*authOAuth) > 0 || len(*authApp) > 0 || len(*authToken) > 0 {
-		var transports []*ghratelimit.Transport
+		var balancing ghratelimit.BalancingTransport
 		// If using OAuth credentials, just use basic auth.
 		for _, params := range *authOAuth {
 			clientID, clientSecret, ok := strings.Cut(params, ":")
@@ -219,12 +220,13 @@ func main() {
 			if err != nil {
 				log.Fatal().Err(err).Str("client_id", clientID).Msg("ghauth.Basic failed")
 			}
-			transports = append(transports, &ghratelimit.Transport{
+			balancing = append(balancing, &ghratelimit.Transport{
 				Base: authTransport,
 				Limits: ghratelimit.Limits{
 					Notify: reportRateLimit(clientID, "", "", *rateResources),
 				},
-				Spoof: *rateSpoof,
+				Reserve: *rateReserve,
+				Spoof:   *rateSpoof,
 			})
 		}
 		// If using GitHub App credentials, use the GitHub App transport.
@@ -241,7 +243,7 @@ func main() {
 			if err != nil {
 				log.Fatal().Err(err).Str("app_id", appID).Msg("ghauth.App failed")
 			}
-			transports = append(transports, &ghratelimit.Transport{
+			balancing = append(balancing, &ghratelimit.Transport{
 				Base: &oauth2.Transport{
 					Base:   newBaseTransport(),
 					Source: ts,
@@ -249,13 +251,14 @@ func main() {
 				Limits: ghratelimit.Limits{
 					Notify: reportRateLimit(appID, installationID, "", *rateResources),
 				},
-				Spoof: *rateSpoof,
+				Reserve: *rateReserve,
+				Spoof:   *rateSpoof,
 			})
 		}
 		for _, token := range *authToken {
 			hashed := sha256.Sum256([]byte(token))
 			hashedToken := base64.StdEncoding.EncodeToString(hashed[:])
-			transports = append(transports, &ghratelimit.Transport{
+			balancing = append(balancing, &ghratelimit.Transport{
 				Base: &oauth2.Transport{
 					Base:   newBaseTransport(),
 					Source: oauth2.StaticTokenSource(ghauth.Token(token)),
@@ -263,25 +266,19 @@ func main() {
 				Limits: ghratelimit.Limits{
 					Notify: reportRateLimit("", "", hashedToken, *rateResources),
 				},
-				Spoof: *rateSpoof,
+				Reserve: *rateReserve,
+				Spoof:   *rateSpoof,
 			})
 		}
 		// If RPH is set, wrap each individual transport in a rate-limiting transport.
-		for _, t := range transports {
+		for _, t := range balancing {
 			t.Base = ratelimit.New(t.Base, *rph, ratelimit.Per(time.Hour))
 		}
 		// Poll the rate limits for each transport.
-		for _, t := range transports {
-			go t.Poll(ctx, *rateInterval, proxyURL.ResolveReference(&url.URL{
-				Path: "/rate_limit",
-			}))
-		}
-		// Balance requests round-robin across the credentials.
-		roundRobin := make([]http.RoundTripper, len(transports))
-		for i, t := range transports {
-			roundRobin[i] = t
-		}
-		transport = RoundRobin(roundRobin)
+		go balancing.Poll(ctx, *rateInterval, proxyURL.ResolveReference(&url.URL{
+			Path: "/rate_limit",
+		}))
+		transport = balancing
 	} else {
 		// If RPH is set, wrap the main transport in a rate-limiting transport.
 		if *rph > 0 {
