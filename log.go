@@ -33,25 +33,35 @@ func sanitizeHeaders(headers http.Header) http.Header {
 	return sanitized
 }
 
-// logAddrDict splits a "host:port" address into an "ip"/"port" Dict,
-// falling back to hostport unchanged as the ip (with no port) if it can't be
-// split (e.g. it's already a bare host), or nil if hostport is empty (e.g.
-// the address wasn't known, so the field should be omitted entirely).
-func logAddrDict(hostport string) *zerolog.Event {
+// addAddrFields splits a "host:port" address and sets its "ip"/"port"
+// fields directly on d, falling back to hostport unchanged as the ip (with
+// no port) if it can't be split (e.g. it's already a bare host). Does
+// nothing if hostport is empty (e.g. the address wasn't known).
+func addAddrFields(d *zerolog.Event, hostport string) {
 	if hostport == "" {
-		return nil
+		return
 	}
 	ip, port, err := net.SplitHostPort(hostport)
 	if err != nil {
 		ip, port = hostport, ""
 	}
-	d := zerolog.Dict()
 	if ip != "" {
 		d.Str("ip", ip)
 	}
 	if port != "" {
 		d.Str("port", port)
 	}
+}
+
+// logAddrDict builds an "ip"/"port" Dict for hostport, or nil if hostport
+// is empty (e.g. the address wasn't known, so the field should be omitted
+// entirely).
+func logAddrDict(hostport string) *zerolog.Event {
+	if hostport == "" {
+		return nil
+	}
+	d := zerolog.Dict()
+	addAddrFields(d, hostport)
 	return d
 }
 
@@ -138,23 +148,24 @@ type LoggingTransport struct {
 	// to poll rate limit status rather than in response to real traffic.
 	LogRateLimit bool
 	// LogRequestLocalAddr controls whether the listener's own address
-	// (the one the client connected to) is logged as request.local_addr.
+	// (the one the client connected to) is logged as
+	// request.conn.local.
 	LogRequestLocalAddr bool
 	// LogRequestRemoteAddr controls whether the client's address (plus
-	// the incoming connection's id) is logged as request.remote_addr.
+	// the incoming connection's id) is logged as request.conn.remote.
 	LogRequestRemoteAddr bool
 	// LogResponseLocalAddr controls whether the address the proxy dialed
 	// out from (e.g. matching a configured --src-ip) is logged as
-	// response.local_addr.
+	// response.conn.local.
 	LogResponseLocalAddr bool
 	// LogResponseRemoteAddr controls whether the upstream GitHub
 	// server's address (plus the connection's id) is logged as
-	// response.remote_addr.
+	// response.conn.remote.
 	LogResponseRemoteAddr bool
-	// LogConnReuse controls whether the response's connection reuse
-	// stats (reused, was_idle, idle_time) are logged, describing whether
-	// the upstream connection used for this request was freshly dialed
-	// or reused from the pool.
+	// LogConnReuse controls whether connection reuse stats (reused,
+	// was_idle, idle_time) are logged under response.conn.remote,
+	// describing whether the upstream connection used for this request
+	// was freshly dialed or reused from the pool.
 	LogConnReuse bool
 	// LogRequestHeaders controls whether the full (sanitized) request
 	// headers are logged in the "request" object.
@@ -209,18 +220,22 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	if req.URL.RawQuery != "" {
 		reqDict.Str("query", req.URL.RawQuery)
 	}
-	if t.LogRequestLocalAddr {
-		if local := logAddrDict(FromContext[string](req.Context(), ctxConnLocalAddr{})); local != nil {
-			reqDict.Dict("local_addr", local)
-		}
-	}
-	if t.LogRequestRemoteAddr {
-		if remote := logAddrDict(req.RemoteAddr); remote != nil {
-			if id := FromContext[xid.ID](req.Context(), ctxConnXID{}); !id.IsNil() {
-				remote.Str("id", id.String())
+	if t.LogRequestLocalAddr || t.LogRequestRemoteAddr {
+		conn := zerolog.Dict()
+		if t.LogRequestLocalAddr {
+			if local := logAddrDict(FromContext[string](req.Context(), ctxConnLocalAddr{})); local != nil {
+				conn.Dict("local", local)
 			}
-			reqDict.Dict("remote_addr", remote)
 		}
+		if t.LogRequestRemoteAddr {
+			if remote := logAddrDict(req.RemoteAddr); remote != nil {
+				if id := FromContext[xid.ID](req.Context(), ctxConnXID{}); !id.IsNil() {
+					remote.Str("id", id.String())
+				}
+				conn.Dict("remote", remote)
+			}
+		}
+		reqDict.Dict("conn", conn)
 	}
 	if userAgent := req.Header.Get("User-Agent"); userAgent != "" {
 		reqDict.Str("user_agent", userAgent)
@@ -235,28 +250,32 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	if resp != nil {
 		respDict := zerolog.Dict()
 		respDict.Int("status", resp.StatusCode)
-		if gotConn != nil && gotConn.Conn != nil {
+		if gotConn != nil && gotConn.Conn != nil && (t.LogResponseLocalAddr || t.LogResponseRemoteAddr || t.LogConnReuse) {
+			conn := zerolog.Dict()
 			if t.LogResponseLocalAddr {
 				if local := logAddrDict(gotConn.Conn.LocalAddr().String()); local != nil {
-					respDict.Dict("local_addr", local)
+					conn.Dict("local", local)
 				}
 			}
-			if t.LogResponseRemoteAddr {
-				if remote := logAddrDict(gotConn.Conn.RemoteAddr().String()); remote != nil {
-					if conn, ok := gotConn.Conn.(*xidConn); ok {
-						remote.Str("id", conn.id.String())
+			if t.LogResponseRemoteAddr || t.LogConnReuse {
+				remote := zerolog.Dict()
+				if t.LogResponseRemoteAddr {
+					addAddrFields(remote, gotConn.Conn.RemoteAddr().String())
+					if xc, ok := gotConn.Conn.(*xidConn); ok {
+						remote.Str("id", xc.id.String())
 					}
-					respDict.Dict("remote_addr", remote)
 				}
-			}
-			if t.LogConnReuse {
-				respDict.Bool("reused", gotConn.Reused)
-				respDict.Bool("was_idle", gotConn.WasIdle)
-				if gotConn.WasIdle {
-					// IdleTime is only meaningful when WasIdle is true.
-					respDict.Dur("idle_time", gotConn.IdleTime)
+				if t.LogConnReuse {
+					remote.Bool("reused", gotConn.Reused)
+					remote.Bool("was_idle", gotConn.WasIdle)
+					if gotConn.WasIdle {
+						// IdleTime is only meaningful when WasIdle is true.
+						remote.Dur("idle_time", gotConn.IdleTime)
+					}
 				}
+				conn.Dict("remote", remote)
 			}
+			respDict.Dict("conn", conn)
 		}
 		if cache := logCacheStatus(resp); cache != nil {
 			respDict.Dict("cache", cache)
