@@ -70,9 +70,11 @@ The proxy supports multiple authentication methods that can be used simultaneous
 
 ### Caching
 
-#### In-Memory (Default)
+Caching is disabled by default; pass one of the flags below to enable it.
+
+#### In-Memory
 ```bash
-./github-api-proxy
+./github-api-proxy --cache-memory
 ```
 
 #### Pebble
@@ -136,6 +138,7 @@ The proxy supports multiple authentication methods that can be used simultaneous
 | `--rate-reserve` | Proactively reserve rate limit capacity for in-flight requests before response headers are parsed | `true` |
 | `--rate-spoof` | Return a synthetic 429 response instead of forwarding requests once a credential's rate limit is exhausted | `true` |
 | `--src-ip` | Source IP addresses to balance outgoing requests across (round-robin) | (none) |
+| `--cache-memory` | Use an in-memory cache for conditional requests | `false` |
 | `--cache-bbolt-db` | Path to BoltDB for caching | (disabled) |
 | `--cache-bbolt-bucket` | BoltDB bucket name | `github-api-proxy` |
 | `--cache-pebble-db` | Path to PebbleDB for caching | (disabled) |

@@ -99,6 +99,7 @@ func main() {
 	listenAddrs := pflag.StringSlice("listen", []string{"127.0.0.1:44879"}, "Address(es) to listen on, optionally prefixed with 'network:' (e.g. 'unix:/github-api-proxy.sock'); network defaults to 'tcp'")
 	tlsCert := pflag.String("tls-cert", "", "TLS certificate file to use")
 	tlsKey := pflag.String("tls-key", "", "TLS key file to use")
+	cacheMemory := pflag.Bool("cache-memory", false, "Use an in-memory cache for conditional requests (lost on restart, not shared across processes)")
 	pebbleDBPath := pflag.String("cache-pebble-db", "", "Path to PebbleDB to use for caching")
 	boltDBPath := pflag.String("cache-bbolt-db", "", "Path to BoltDB to use for caching")
 	boltDBBucket := pflag.String("cache-bbolt-bucket", "github-api-proxy", "BoltDB bucket to use for caching")
@@ -148,7 +149,8 @@ func main() {
 		log.Fatal().Err(err).Msg("SrcIPTransports failed")
 	}
 
-	// Setup the relevant storage backend, defaulting to in-memory.
+	// Setup the relevant storage backend, if any (caching is disabled unless
+	// one of --cache-memory or --cache-* is given).
 	var storage ghtransport.Storage
 	if *pebbleDBPath != "" {
 		pebbleStorage, err := pebblestorage.Open(*pebbleDBPath, nil)
@@ -201,18 +203,24 @@ func main() {
 			DB:       *redisDB,
 		})
 		storage = redisstorage.New(redisClient)
-	} else {
+	} else if *cacheMemory {
 		storage = memory.NewStorage()
 	}
 
 	// Wrap each source IP's dial transport with status tracking (before) and
-	// caching (after), then wrap the whole thing with logging, so it can
-	// report both the status the caching layer returns and (via context)
-	// the raw upstream status, giving one full chain per source IP.
+	// caching (after, only if a storage backend was configured), then wrap
+	// the whole thing with logging, so it can report both the status the
+	// caching layer returns and (via context) the raw upstream status,
+	// giving one full chain per source IP.
 	chains := make([]http.RoundTripper, len(srcIPDials))
 	for idx, dial := range srcIPDials {
+		base := &LatencyTransport{Base: dial}
+		var chainBase http.RoundTripper = base
+		if storage != nil {
+			chainBase = ghtransport.NewTransport(storage, base)
+		}
 		chains[idx] = &LoggingTransport{
-			Base:               ghtransport.NewTransport(storage, &LatencyTransport{Base: dial}),
+			Base:               chainBase,
 			LogRateLimit:       *logRateLimit,
 			LogConn:            *logConn,
 			LogRequestHeaders:  *logRequestHeaders,
