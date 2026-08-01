@@ -210,19 +210,17 @@ func main() {
 	}
 
 	// Wrap each source IP's dial transport with status tracking (before) and
-	// caching (after, only if a storage backend was configured), then wrap
-	// the whole thing with logging, so it can report both the status the
-	// caching layer returns and (via context) the raw upstream status,
-	// giving one full chain per source IP.
+	// conditional-request caching (after; storage may be nil if no backend
+	// was configured, in which case nothing is read/written but the
+	// speculative empty-array ETag guess still applies), then wrap the whole
+	// thing with logging, so it can report both the status the caching layer
+	// returns and (via context) the raw upstream status, giving one full
+	// chain per source IP.
 	chains := make([]http.RoundTripper, len(srcIPDials))
 	for idx, dial := range srcIPDials {
 		base := &LatencyTransport{Base: dial}
-		var chainBase http.RoundTripper = base
-		if storage != nil {
-			chainBase = ghtransport.NewTransport(storage, base)
-		}
 		chains[idx] = &LoggingTransport{
-			Base:               chainBase,
+			Base:               ghtransport.NewTransport(storage, base),
 			LogRateLimit:       *logRateLimit,
 			LogConn:            *logConn,
 			LogRequestHeaders:  *logRequestHeaders,
