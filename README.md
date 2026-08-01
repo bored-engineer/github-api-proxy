@@ -160,11 +160,13 @@ Caching is disabled by default; pass one of the flags below to enable it.
 | `--log-conn` | Log details about the underlying network connection used for each request (remote address, whether it was reused, and idle time) | `false` |
 | `--log-request-headers` | Log the full request headers for each request (the `Authorization` value, if any, is always replaced with its hash) | `false` |
 | `--log-response-headers` | Log the full response headers for each request (the `Authorization` value, if any, is always replaced with its hash) | `false` |
+| `--pprof` | Expose `net/http/pprof` debug endpoints under `/pprof/` (WARNING: allows dumping goroutines, heap, and CPU profiles; do not enable on a publicly reachable listener) | `false` |
 
 ## API Endpoints
 
 - `/` - Proxies all requests to the upstream GitHub REST API
 - `/metrics` - Prometheus metrics endpoint
+- `/pprof/` - `net/http/pprof` debug endpoints, only registered when `--pprof` is set
 
 ## Monitoring
 
