@@ -11,7 +11,7 @@ require (
 	github.com/bored-engineer/github-conditional-http-transport/pebble v0.0.2-0.20260731234000-158e69969411
 	github.com/bored-engineer/github-conditional-http-transport/redis v0.0.2-0.20260731234000-158e69969411
 	github.com/bored-engineer/github-conditional-http-transport/s3 v0.0.2-0.20260731234000-158e69969411
-	github.com/bored-engineer/github-rate-limit-http-transport v0.0.0-20260731061419-3da0c5c3f9bd
+	github.com/bored-engineer/github-rate-limit-http-transport v0.0.0-20260801052921-66778e7555ac
 	github.com/bored-engineer/ratelimit-transport v0.0.0-20260112232851-ff2f1f464758
 	github.com/prometheus/client_golang v1.23.2
 	github.com/redis/go-redis/v9 v9.17.2
