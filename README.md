@@ -152,7 +152,6 @@ The proxy supports multiple authentication methods that can be used simultaneous
 | `--retry-wait-max` | Maximum backoff delay between retries | `30s` |
 | `--rate-retry` | Retry 429 responses until `Retry-After` clears, instead of counting them against `--retries` | `true` |
 | `--log-level` | Minimum log level to output (`trace`, `debug`, `info`, `warn`, `error`) | `info` |
-| `--log-format` | Log output format: `console` for human-readable, `json` for structured, or `auto` to use `console` when stderr is a terminal and `json` otherwise | `auto` |
 | `--log-rate-limit` | Log requests to the `/rate_limit` API, normally suppressed since they're issued periodically to poll rate limit status rather than in response to real traffic | `false` |
 | `--log-addr` | Log the `incoming`/`source` IP and port for each request | `false` |
 | `--log-conn` | Log details about the underlying network connection used for each request (remote address, whether it was reused, and idle time) | `false` |
@@ -173,7 +172,7 @@ The proxy exposes Prometheus metrics at `/metrics`:
 
 ## Logging
 
-Each proxied request is logged as a single structured line (`--log-format json`) or a human-readable line (`--log-format console`); by default (`--log-format auto`) whichever is appropriate is chosen automatically based on whether stderr is a terminal. Request- and response-specific fields are grouped into nested `request` and `response` objects:
+Each proxied request is logged as a single structured JSON line. Request- and response-specific fields are grouped into nested `request` and `response` objects:
 
 ```json
 {

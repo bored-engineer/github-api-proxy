@@ -13,7 +13,6 @@ require (
 	github.com/bored-engineer/github-conditional-http-transport/s3 v0.0.2-0.20260731234000-158e69969411
 	github.com/bored-engineer/github-rate-limit-http-transport v0.0.0-20260731061419-3da0c5c3f9bd
 	github.com/bored-engineer/ratelimit-transport v0.0.0-20260112232851-ff2f1f464758
-	github.com/mattn/go-isatty v0.0.20
 	github.com/prometheus/client_golang v1.23.2
 	github.com/redis/go-redis/v9 v9.17.2
 	github.com/rs/xid v1.6.0
@@ -64,6 +63,7 @@ require (
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
+	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/minio/minlz v1.0.1 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/pkg/errors v0.9.1 // indirect

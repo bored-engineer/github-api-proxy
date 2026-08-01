@@ -27,7 +27,6 @@ import (
 	s3storage "github.com/bored-engineer/github-conditional-http-transport/s3"
 	ghratelimit "github.com/bored-engineer/github-rate-limit-http-transport"
 	ratelimit "github.com/bored-engineer/ratelimit-transport"
-	"github.com/mattn/go-isatty"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -124,7 +123,6 @@ func main() {
 	retryWaitMax := pflag.Duration("retry-wait-max", 30*time.Second, "maximum backoff delay between retries")
 	rateRetry := pflag.Bool("rate-retry", true, "retry 429 responses until Retry-After clears, instead of counting them against --retries")
 	logLevel := pflag.String("log-level", "info", "minimum log level to output (trace, debug, info, warn, error)")
-	logFormat := pflag.String("log-format", "auto", "log output format: 'console' for human-readable, 'json' for structured, or 'auto' to use 'console' when stderr is a terminal and 'json' otherwise")
 	logRateLimit := pflag.Bool("log-rate-limit", false, "log requests to the /rate_limit API, normally suppressed since they're issued periodically to poll rate limit status rather than in response to real traffic")
 	logAddr := pflag.Bool("log-addr", false, "log the incoming/source IP and port for each request")
 	logConn := pflag.Bool("log-conn", false, "log details about the underlying network connection used for each request (remote address, whether it was reused, and idle time)")
@@ -137,22 +135,6 @@ func main() {
 		log.Fatal().Err(err).Str("log_level", *logLevel).Msg("zerolog.ParseLevel failed")
 	}
 	zerolog.SetGlobalLevel(level)
-	format := *logFormat
-	if format == "auto" {
-		if isatty.IsTerminal(os.Stderr.Fd()) || isatty.IsCygwinTerminal(os.Stderr.Fd()) {
-			format = "console"
-		} else {
-			format = "json"
-		}
-	}
-	switch format {
-	case "console":
-		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
-	case "json":
-		// This is zerolog's default output, nothing to do.
-	default:
-		log.Fatal().Str("log_format", *logFormat).Msg("invalid --log-format, must be 'console', 'json', or 'auto'")
-	}
 
 	proxyURL, err := url.Parse(*apiURL)
 	if err != nil {
@@ -243,7 +225,7 @@ func main() {
 			LogResponseHeaders: *logResponseHeaders,
 		}
 		if len(*srcIPs) > 0 {
-			chain = &SrcIPTransport{IP: (*srcIPs)[i], Base: chain}
+			chain = &ContextTransport{Base: chain, Key: srcIPContextKey{}, Value: (*srcIPs)[i]}
 		}
 		chains[i] = chain
 	}
