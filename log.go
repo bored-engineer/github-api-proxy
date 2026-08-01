@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	ghtransport "github.com/bored-engineer/github-conditional-http-transport"
 	ghratelimit "github.com/bored-engineer/github-rate-limit-http-transport"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -109,220 +110,122 @@ func (t *UpstreamStatusTransport) RoundTrip(req *http.Request) (*http.Response, 
 	return resp, err
 }
 
-// cacheFields renders the "cache" object of a log line, parsed from the
-// "Cache-Status" header (RFC 9211) that github-conditional-http-transport
-// sets on every response.
-type cacheFields struct {
-	ETag   string
-	Hit    bool
-	Stored bool
-	Reason string
+// logAddr builds a Dict for an "ip"/"port" pair, or nil if both are empty
+// (e.g. the address wasn't known, so the field should be omitted entirely).
+func logAddr(ip, port string) *zerolog.Event {
+	if ip == "" && port == "" {
+		return nil
+	}
+	d := zerolog.Dict()
+	if ip != "" {
+		d.Str("ip", ip)
+	}
+	if port != "" {
+		d.Str("port", port)
+	}
+	return d
 }
 
-// MarshalZerologObject implements zerolog.LogObjectMarshaler.
-func (c cacheFields) MarshalZerologObject(e *zerolog.Event) {
-	if c.ETag != "" {
-		e.Str("etag", c.ETag)
+// logConn builds the "conn" object of a log line from an
+// httptrace.GotConnInfo, describing the underlying network connection used
+// for this specific attempt. Returns nil if info is nil (e.g. an error
+// occurred before a connection was ever obtained).
+func logConn(info *httptrace.GotConnInfo) *zerolog.Event {
+	if info == nil {
+		return nil
 	}
-	e.Bool("hit", c.Hit)
-	e.Bool("stored", c.Stored)
-	if c.Reason != "" {
-		e.Str("reason", c.Reason)
+	d := zerolog.Dict()
+	if id := ConnID(info.Conn); id != "" {
+		d.Str("id", id)
 	}
+	if info.Conn != nil {
+		if remote := logAddr(splitHostPort(info.Conn.RemoteAddr().String())); remote != nil {
+			d.Dict("remote", remote)
+		}
+	}
+	d.Bool("reused", info.Reused)
+	d.Bool("was_idle", info.WasIdle)
+	if info.WasIdle {
+		// IdleTime is only meaningful when WasIdle is true.
+		d.Dur("idle_time", info.IdleTime)
+	}
+	return d
 }
 
-// parseCacheStatus parses the parameters of a "Cache-Status" header value
-// (RFC 9211) as set by github-conditional-http-transport, e.g.
+// logAuth builds the "auth" object of a log line, identifying which
+// credential authenticated req: ClientID/InstallationID come from context
+// (set by AuthTransport for whichever configured credential is in use),
+// while HashedToken is computed directly from the request's current
+// Authorization header, so it's populated even for a pass-through request
+// authenticated by the client's own header rather than a configured
+// --auth-* credential.
+func logAuth(req *http.Request) *zerolog.Event {
+	auth := AuthFieldsFromContext(req.Context())
+	d := zerolog.Dict()
+	if auth.ClientID != "" {
+		d.Str("client_id", auth.ClientID)
+	}
+	if auth.InstallationID != "" {
+		d.Str("installation_id", auth.InstallationID)
+	}
+	if authorization := req.Header.Get("Authorization"); authorization != "" {
+		d.Str("hashed_token", ghtransport.HashToken(authorization))
+	}
+	return d
+}
+
+// logCacheStatus parses resp's "Cache-Status" header (RFC 9211), as set by
+// github-conditional-http-transport on every response, into a Dict with
+// etag/hit/stored/reason. Returns nil if the header is empty, meaning
+// caching wasn't in play for this response at all. Example header values:
 // "github-conditional-http-transport; hit" or "...; fwd=uri-miss;
-// fwd-status=200; stored". ok is false if header is empty, meaning caching
-// wasn't in play for this response at all.
-func parseCacheStatus(header string) (fields cacheFields, ok bool) {
+// fwd-status=200; stored".
+func logCacheStatus(resp *http.Response) *zerolog.Event {
+	header := resp.Header.Get("Cache-Status")
 	if header == "" {
-		return cacheFields{}, false
+		return nil
 	}
+	d := zerolog.Dict()
+	if etag := resp.Header.Get("Etag"); etag != "" {
+		d.Str("etag", etag)
+	}
+	var hit, stored bool
+	var reason string
 	for _, param := range strings.Split(header, ";")[1:] { // skip the leading cache name
 		switch param = strings.TrimSpace(param); {
 		case param == "hit":
-			fields.Hit = true
+			hit = true
 		case param == "stored":
-			fields.Stored = true
+			stored = true
 		case strings.HasPrefix(param, "fwd="):
-			fields.Reason = strings.TrimPrefix(param, "fwd=")
+			reason = strings.TrimPrefix(param, "fwd=")
 		}
 	}
-	return fields, true
+	d.Bool("hit", hit)
+	d.Bool("stored", stored)
+	if reason != "" {
+		d.Str("reason", reason)
+	}
+	return d
 }
 
-// rateLimitFields renders the "ratelimit" object of a log line.
-type rateLimitFields struct {
-	ghratelimit.Rate
-	Resource string
-}
-
-// MarshalZerologObject implements zerolog.LogObjectMarshaler.
-func (r rateLimitFields) MarshalZerologObject(e *zerolog.Event) {
-	e.Uint64("limit", r.Limit)
-	e.Uint64("used", r.Used)
-	e.Uint64("remaining", r.Remaining)
-	e.Uint64("reset", r.Reset)
-	if r.Resource != "" {
-		e.Str("resource", r.Resource)
+// logRateLimit parses resp's rate-limit headers into the "ratelimit"
+// object of a log line. Returns nil if resp doesn't carry rate-limit
+// headers (e.g. it's not a GitHub API response).
+func logRateLimit(resp *http.Response) *zerolog.Event {
+	rate, err := ghratelimit.ParseRate(resp.Header)
+	if err != nil {
+		return nil
 	}
-}
-
-// addrFields renders an "ip"/"port" pair as a nested object.
-type addrFields struct {
-	IP   string
-	Port string
-}
-
-// Empty reports whether neither field was populated (e.g. the address
-// wasn't known, so the object should be omitted entirely).
-func (a addrFields) Empty() bool {
-	return a.IP == "" && a.Port == ""
-}
-
-// MarshalZerologObject implements zerolog.LogObjectMarshaler.
-func (a addrFields) MarshalZerologObject(e *zerolog.Event) {
-	if a.IP != "" {
-		e.Str("ip", a.IP)
+	d := zerolog.Dict()
+	d.Uint64("limit", rate.Limit)
+	d.Uint64("used", rate.Used)
+	d.Uint64("remaining", rate.Remaining)
+	d.Uint64("reset", rate.Reset)
+	if resource := resp.Header.Get("X-Ratelimit-Resource"); resource != "" {
+		d.Str("resource", resource)
 	}
-	if a.Port != "" {
-		e.Str("port", a.Port)
-	}
-}
-
-// connFields renders the "conn" object of a log line, describing the
-// underlying network connection used for this specific attempt (captured
-// via httptrace.GotConnInfo).
-type connFields struct {
-	// ID uniquely identifies the underlying connection (assigned once when
-	// it's dialed, via WithConnID), stable across every request that
-	// reuses it, so they can be correlated in logs.
-	ID string
-	// Remote is the address of the upstream (GitHub) server this
-	// connection is actually established with.
-	Remote  addrFields
-	Reused  bool
-	WasIdle bool
-	// IdleTime reports how long the connection was previously idle, only
-	// meaningful (and only logged) when WasIdle is true.
-	IdleTime time.Duration
-}
-
-// MarshalZerologObject implements zerolog.LogObjectMarshaler.
-func (c connFields) MarshalZerologObject(e *zerolog.Event) {
-	if c.ID != "" {
-		e.Str("id", c.ID)
-	}
-	if !c.Remote.Empty() {
-		e.Object("remote", c.Remote)
-	}
-	e.Bool("reused", c.Reused)
-	e.Bool("was_idle", c.WasIdle)
-	if c.WasIdle {
-		e.Dur("idle_time", c.IdleTime)
-	}
-}
-
-// requestFields renders the "request" object of a log line.
-type requestFields struct {
-	ID     string
-	Method string
-	Scheme string
-	Host   string
-	Path   string
-	// Query is the (sanitized) raw query string, without the leading "?".
-	Query string
-	// Incoming is the address of the client that connected to the proxy
-	// (i.e. the inbound *http.Request's RemoteAddr).
-	Incoming addrFields
-	// Conn describes the underlying network connection used for this
-	// attempt, non-nil only if --log-conn was set (since it requires an
-	// httptrace.ClientTrace on every request).
-	Conn      *connFields
-	UserAgent string
-	// Source is the IP this request was dialed from, set only if --src-ip was used.
-	Source addrFields
-	Auth   AuthFields
-	// Headers holds the full (sanitized) request headers, non-nil only if
-	// --log-request-headers was set.
-	Headers http.Header
-}
-
-// MarshalZerologObject implements zerolog.LogObjectMarshaler.
-func (r requestFields) MarshalZerologObject(e *zerolog.Event) {
-	if r.ID != "" {
-		e.Str("id", r.ID)
-	}
-	e.Str("method", r.Method)
-	e.Str("scheme", r.Scheme)
-	e.Str("host", r.Host)
-	e.Str("path", r.Path)
-	if r.Query != "" {
-		e.Str("query", r.Query)
-	}
-	if !r.Incoming.Empty() {
-		e.Object("incoming", r.Incoming)
-	}
-	if r.Conn != nil {
-		e.Object("conn", *r.Conn)
-	}
-	if r.UserAgent != "" {
-		e.Str("user_agent", r.UserAgent)
-	}
-	if !r.Source.Empty() {
-		e.Object("source", r.Source)
-	}
-	e.Object("auth", r.Auth)
-	if r.Headers != nil {
-		e.Interface("headers", r.Headers)
-	}
-}
-
-// responseFields renders the "response" object of a log line.
-type responseFields struct {
-	// Status is the status code ultimately returned for the request (e.g.
-	// after a cached body/status is substituted for a 304 Not Modified
-	// response).
-	Status int
-	// Cache holds the parsed "Cache-Status" header (RFC 9211), nil if the
-	// header wasn't present (caching wasn't in play for this response).
-	Cache       *cacheFields
-	Size        int64
-	RequestID   string
-	MediaType   string
-	ContentType string
-	RateLimit   *rateLimitFields
-	// Headers holds the full (sanitized) response headers, non-nil only if
-	// --log-response-headers was set.
-	Headers http.Header
-}
-
-// MarshalZerologObject implements zerolog.LogObjectMarshaler.
-func (r responseFields) MarshalZerologObject(e *zerolog.Event) {
-	e.Int("status", r.Status)
-	if r.Cache != nil {
-		e.Object("cache", *r.Cache)
-	}
-	if r.Size > 0 {
-		e.Int64("size", r.Size)
-	}
-	if r.RequestID != "" {
-		e.Str("request_id", r.RequestID)
-	}
-	if r.MediaType != "" {
-		e.Str("media_type", r.MediaType)
-	}
-	if r.ContentType != "" {
-		e.Str("content_type", r.ContentType)
-	}
-	if r.RateLimit != nil {
-		e.Object("ratelimit", *r.RateLimit)
-	}
-	if r.Headers != nil {
-		e.Interface("headers", r.Headers)
-	}
+	return d
 }
 
 // LoggingTransport logs each request/response and records latency metrics.
@@ -332,10 +235,6 @@ type LoggingTransport struct {
 	// they are typically noisy since they're issued on a fixed interval
 	// to poll rate limit status rather than in response to real traffic.
 	LogRateLimit bool
-	// LocalIP is the source IP this transport dials from, logged as the
-	// "source" object in the "request" object when non-empty (i.e. when
-	// --src-ip was used).
-	LocalIP string
 	// LogAddr controls whether the "incoming" and "source" address objects
 	// are logged.
 	LogAddr bool
@@ -384,62 +283,66 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	}
 	evt = evt.Dur("duration", duration)
 
-	// Add the request details.
-	reqFields := requestFields{
-		ID:        RequestIDFromContext(req.Context()),
-		Method:    req.Method,
-		Scheme:    req.URL.Scheme,
-		Host:      req.URL.Host,
-		Path:      req.URL.Path,
-		Query:     sanitizeQuery(req.URL.RawQuery),
-		UserAgent: req.Header.Get("User-Agent"),
-		Auth:      AuthFieldsFromContext(req.Context()),
+	// Build the "request" object.
+	reqDict := zerolog.Dict()
+	if id := RequestIDFromContext(req.Context()); id != "" {
+		reqDict.Str("id", id)
+	}
+	reqDict.Str("method", req.Method)
+	reqDict.Str("scheme", req.URL.Scheme)
+	reqDict.Str("host", req.URL.Host)
+	reqDict.Str("path", req.URL.Path)
+	if query := sanitizeQuery(req.URL.RawQuery); query != "" {
+		reqDict.Str("query", query)
 	}
 	if t.LogAddr {
-		incomingIP, incomingPort := splitHostPort(req.RemoteAddr)
-		reqFields.Incoming = addrFields{IP: incomingIP, Port: incomingPort}
-		reqFields.Source = addrFields{IP: t.LocalIP}
-	}
-	if t.LogConn && gotConn != nil {
-		connInfo := connFields{
-			ID:       ConnID(gotConn.Conn),
-			Reused:   gotConn.Reused,
-			WasIdle:  gotConn.WasIdle,
-			IdleTime: gotConn.IdleTime,
+		if incoming := logAddr(splitHostPort(req.RemoteAddr)); incoming != nil {
+			reqDict.Dict("incoming", incoming)
 		}
-		if gotConn.Conn != nil {
-			connInfo.Remote.IP, connInfo.Remote.Port = splitHostPort(gotConn.Conn.RemoteAddr().String())
+		if source := logAddr(SrcIPFromContext(req.Context()), ""); source != nil {
+			reqDict.Dict("source", source)
 		}
-		reqFields.Conn = &connInfo
 	}
+	if t.LogConn {
+		if conn := logConn(gotConn); conn != nil {
+			reqDict.Dict("conn", conn)
+		}
+	}
+	if userAgent := req.Header.Get("User-Agent"); userAgent != "" {
+		reqDict.Str("user_agent", userAgent)
+	}
+	reqDict.Dict("auth", logAuth(req))
 	if t.LogRequestHeaders {
-		reqFields.Headers = sanitizeHeaders(req.Header)
+		reqDict.Interface("headers", sanitizeHeaders(req.Header))
 	}
-	evt = evt.Object("request", reqFields)
+	evt = evt.Dict("request", reqDict)
 
 	// If the response is not nil, add the response details.
 	if resp != nil {
-		fields := responseFields{
-			Status:      resp.StatusCode,
-			Size:        resp.ContentLength,
-			RequestID:   resp.Header.Get("X-Github-Request-Id"),
-			MediaType:   resp.Header.Get("X-Github-Media-Type"),
-			ContentType: resp.Header.Get("Content-Type"),
+		respDict := zerolog.Dict()
+		respDict.Int("status", resp.StatusCode)
+		if cache := logCacheStatus(resp); cache != nil {
+			respDict.Dict("cache", cache)
 		}
-		if cache, ok := parseCacheStatus(resp.Header.Get("Cache-Status")); ok {
-			cache.ETag = resp.Header.Get("Etag")
-			fields.Cache = &cache
+		if resp.ContentLength > 0 {
+			respDict.Int64("size", resp.ContentLength)
 		}
-		if rate, err := ghratelimit.ParseRate(resp.Header); err == nil {
-			fields.RateLimit = &rateLimitFields{
-				Rate:     rate,
-				Resource: resp.Header.Get("X-Ratelimit-Resource"),
-			}
+		if requestID := resp.Header.Get("X-Github-Request-Id"); requestID != "" {
+			respDict.Str("request_id", requestID)
+		}
+		if mediaType := resp.Header.Get("X-Github-Media-Type"); mediaType != "" {
+			respDict.Str("media_type", mediaType)
+		}
+		if contentType := resp.Header.Get("Content-Type"); contentType != "" {
+			respDict.Str("content_type", contentType)
+		}
+		if rl := logRateLimit(resp); rl != nil {
+			respDict.Dict("ratelimit", rl)
 		}
 		if t.LogResponseHeaders {
-			fields.Headers = sanitizeHeaders(resp.Header)
+			respDict.Interface("headers", sanitizeHeaders(resp.Header))
 		}
-		evt = evt.Object("response", fields)
+		evt = evt.Dict("response", respDict)
 	}
 
 	// Fire the log event.

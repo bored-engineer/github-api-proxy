@@ -233,7 +233,7 @@ func main() {
 		if transport, ok := dial.(*http.Transport); ok {
 			dial = WithConnID(transport)
 		}
-		loggingTransport := &LoggingTransport{
+		var chain http.RoundTripper = &LoggingTransport{
 			Base:               ghtransport.NewTransport(storage, &UpstreamStatusTransport{Base: dial}),
 			LogRateLimit:       *logRateLimit,
 			LogAddr:            *logAddr,
@@ -242,9 +242,9 @@ func main() {
 			LogResponseHeaders: *logResponseHeaders,
 		}
 		if len(*srcIPs) > 0 {
-			loggingTransport.LocalIP = (*srcIPs)[i]
+			chain = &SrcIPTransport{IP: (*srcIPs)[i], Base: chain}
 		}
-		chains[i] = loggingTransport
+		chains[i] = chain
 	}
 
 	// The default transport balances requests across all source IPs.
