@@ -88,9 +88,9 @@ func logAuth(req *http.Request) *zerolog.Event {
 
 // logCacheStatus parses resp's "Cache-Status" header (RFC 9211), as set by
 // github-conditional-http-transport on every response, into a Dict with
-// etag/hit/stored/reason. Returns nil if the header is empty, meaning
-// caching wasn't in play for this response at all. Example header values:
-// "github-conditional-http-transport; hit" or "...; fwd=uri-miss;
+// etag/last_modified/hit/stored/reason. Returns nil if the header is empty,
+// meaning caching wasn't in play for this response at all. Example header
+// values: "github-conditional-http-transport; hit" or "...; fwd=uri-miss;
 // fwd-status=200; stored".
 func logCacheStatus(resp *http.Response) *zerolog.Event {
 	header := resp.Header.Get("Cache-Status")
@@ -100,6 +100,11 @@ func logCacheStatus(resp *http.Response) *zerolog.Event {
 	d := zerolog.Dict()
 	if etag := resp.Header.Get("Etag"); etag != "" {
 		d.Str("etag", etag)
+	}
+	if lastModified := resp.Header.Get("Last-Modified"); lastModified != "" {
+		if t, err := http.ParseTime(lastModified); err == nil {
+			d.Time("last_modified", t)
+		}
 	}
 	var hit, stored bool
 	var reason string
