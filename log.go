@@ -22,17 +22,6 @@ type (
 	ctxAuthInstallationID struct{}
 )
 
-// splitHostPort splits a "host:port" address into its parts, returning
-// hostport unchanged as the host (with an empty port) if it can't be split
-// (e.g. it's already a bare host, or empty).
-func splitHostPort(hostport string) (host, port string) {
-	host, port, err := net.SplitHostPort(hostport)
-	if err != nil {
-		return hostport, ""
-	}
-	return host, port
-}
-
 // sanitizeHeaders returns a copy of headers with the Authorization value
 // (if any) replaced by its hash, safe to log verbatim (matches the same
 // hashed_token value already surfaced via the "auth" object).
@@ -44,12 +33,17 @@ func sanitizeHeaders(headers http.Header) http.Header {
 	return sanitized
 }
 
-// logAddrDict builds a Dict for an "ip"/"port" pair, or nil if both are
-// empty (e.g. the address wasn't known, so the field should be omitted
-// entirely).
-func logAddrDict(ip, port string) *zerolog.Event {
-	if ip == "" && port == "" {
+// logAddrDict splits a "host:port" address into an "ip"/"port" Dict,
+// falling back to hostport unchanged as the ip (with no port) if it can't be
+// split (e.g. it's already a bare host), or nil if hostport is empty (e.g.
+// the address wasn't known, so the field should be omitted entirely).
+func logAddrDict(hostport string) *zerolog.Event {
+	if hostport == "" {
 		return nil
+	}
+	ip, port, err := net.SplitHostPort(hostport)
+	if err != nil {
+		ip, port = hostport, ""
 	}
 	d := zerolog.Dict()
 	if ip != "" {
@@ -216,12 +210,12 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		reqDict.Str("query", req.URL.RawQuery)
 	}
 	if t.LogRequestLocalAddr {
-		if local := logAddrDict(splitHostPort(FromContext[string](req.Context(), ctxConnLocalAddr{}))); local != nil {
+		if local := logAddrDict(FromContext[string](req.Context(), ctxConnLocalAddr{})); local != nil {
 			reqDict.Dict("local_addr", local)
 		}
 	}
 	if t.LogRequestRemoteAddr {
-		if remote := logAddrDict(splitHostPort(req.RemoteAddr)); remote != nil {
+		if remote := logAddrDict(req.RemoteAddr); remote != nil {
 			if id := FromContext[xid.ID](req.Context(), ctxConnXID{}); !id.IsNil() {
 				remote.Str("id", id.String())
 			}
@@ -243,12 +237,12 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		respDict.Int("status", resp.StatusCode)
 		if gotConn != nil && gotConn.Conn != nil {
 			if t.LogResponseLocalAddr {
-				if local := logAddrDict(splitHostPort(gotConn.Conn.LocalAddr().String())); local != nil {
+				if local := logAddrDict(gotConn.Conn.LocalAddr().String()); local != nil {
 					respDict.Dict("local_addr", local)
 				}
 			}
 			if t.LogResponseRemoteAddr {
-				if remote := logAddrDict(splitHostPort(gotConn.Conn.RemoteAddr().String())); remote != nil {
+				if remote := logAddrDict(gotConn.Conn.RemoteAddr().String()); remote != nil {
 					if conn, ok := gotConn.Conn.(*xidConn); ok {
 						remote.Str("id", conn.id.String())
 					}
