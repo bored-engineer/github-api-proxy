@@ -4,15 +4,11 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptrace"
-	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
 	ghtransport "github.com/bored-engineer/github-conditional-http-transport"
 	ghratelimit "github.com/bored-engineer/github-rate-limit-http-transport"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -28,91 +24,21 @@ func splitHostPort(hostport string) (host, port string) {
 	return host, port
 }
 
-// sensitiveHeaders are header names redacted by sanitizeHeaders before
-// logging, since their values are credentials rather than metadata.
-var sensitiveHeaders = []string{"Authorization", "Cookie", "Set-Cookie"}
-
-// sanitizeHeaders returns a copy of headers with sensitiveHeaders redacted,
-// safe to log verbatim (e.g. the Authorization header holds the raw
-// credential itself, already surfaced non-reversibly via the "auth" object).
+// sanitizeHeaders returns a copy of headers with the Authorization value
+// (if any) replaced by its hash, safe to log verbatim (matches the same
+// hashed_token value already surfaced via the "auth" object).
 func sanitizeHeaders(headers http.Header) http.Header {
 	sanitized := headers.Clone()
-	for _, name := range sensitiveHeaders {
-		if sanitized.Get(name) != "" {
-			sanitized.Set(name, "REDACTED")
-		}
+	if authorization := sanitized.Get("Authorization"); authorization != "" {
+		sanitized.Set("Authorization", ghtransport.HashToken(authorization))
 	}
 	return sanitized
 }
 
-// sensitiveQueryParams are query parameter names redacted by sanitizeQuery
-// before logging, since GitHub's (legacy, but still accepted) query-string
-// authentication forms carry a credential there rather than in a header.
-var sensitiveQueryParams = []string{"access_token", "client_secret"}
-
-// sanitizeQuery returns rawQuery with sensitiveQueryParams values redacted,
-// safe to log verbatim. If rawQuery isn't well-formed enough to parse, or
-// none of sensitiveQueryParams are present, it's returned unchanged.
-func sanitizeQuery(rawQuery string) string {
-	if rawQuery == "" {
-		return ""
-	}
-	values, err := url.ParseQuery(rawQuery)
-	if err != nil {
-		return rawQuery
-	}
-	var redacted bool
-	for _, name := range sensitiveQueryParams {
-		if values.Has(name) {
-			values.Set(name, "REDACTED")
-			redacted = true
-		}
-	}
-	if !redacted {
-		return rawQuery
-	}
-	return values.Encode()
-}
-
-var (
-	Latency = promauto.NewSummaryVec(prometheus.SummaryOpts{
-		Name:      "latency_seconds",
-		Subsystem: "github",
-		Help:      "The latency of the GitHub API",
-		Objectives: map[float64]float64{
-			// Track the p50, p75, p90, p95 and p99
-			0.50: 0.050,
-			0.75: 0.025,
-			0.90: 0.010,
-			0.95: 0.005,
-			0.99: 0.001,
-		},
-	}, []string{"status"})
-)
-
-// UpstreamStatusTransport records latency metrics based on the status code
-// the upstream server actually returned for this specific network round
-// trip -- as opposed to whatever transport chain wraps it further out (e.g.
-// LoggingTransport, around a caching layer that may substitute a cached
-// body/status for a 304 Not Modified response).
-type UpstreamStatusTransport struct {
-	Base http.RoundTripper
-}
-
-// RoundTrip implements http.RoundTripper.
-func (t *UpstreamStatusTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	start := time.Now()
-	resp, err := t.Base.RoundTrip(req)
-	duration := time.Since(start)
-	if resp != nil {
-		Latency.WithLabelValues(strconv.Itoa(resp.StatusCode)).Observe(duration.Seconds())
-	}
-	return resp, err
-}
-
-// logAddr builds a Dict for an "ip"/"port" pair, or nil if both are empty
-// (e.g. the address wasn't known, so the field should be omitted entirely).
-func logAddr(ip, port string) *zerolog.Event {
+// logAddrDict builds a Dict for an "ip"/"port" pair, or nil if both are
+// empty (e.g. the address wasn't known, so the field should be omitted
+// entirely).
+func logAddrDict(ip, port string) *zerolog.Event {
 	if ip == "" && port == "" {
 		return nil
 	}
@@ -126,11 +52,11 @@ func logAddr(ip, port string) *zerolog.Event {
 	return d
 }
 
-// logConn builds the "conn" object of a log line from an
+// logConnDict builds the "conn" object of a log line from an
 // httptrace.GotConnInfo, describing the underlying network connection used
 // for this specific attempt. Returns nil if info is nil (e.g. an error
 // occurred before a connection was ever obtained).
-func logConn(info *httptrace.GotConnInfo) *zerolog.Event {
+func logConnDict(info *httptrace.GotConnInfo) *zerolog.Event {
 	if info == nil {
 		return nil
 	}
@@ -139,7 +65,7 @@ func logConn(info *httptrace.GotConnInfo) *zerolog.Event {
 		d.Str("id", id)
 	}
 	if info.Conn != nil {
-		if remote := logAddr(splitHostPort(info.Conn.RemoteAddr().String())); remote != nil {
+		if remote := logAddrDict(splitHostPort(info.Conn.RemoteAddr().String())); remote != nil {
 			d.Dict("remote", remote)
 		}
 	}
@@ -160,13 +86,12 @@ func logConn(info *httptrace.GotConnInfo) *zerolog.Event {
 // authenticated by the client's own header rather than a configured
 // --auth-* credential.
 func logAuth(req *http.Request) *zerolog.Event {
-	auth := AuthFieldsFromContext(req.Context())
 	d := zerolog.Dict()
-	if auth.ClientID != "" {
-		d.Str("client_id", auth.ClientID)
+	if clientID := ClientIDFromContext(req.Context()); clientID != "" {
+		d.Str("client_id", clientID)
 	}
-	if auth.InstallationID != "" {
-		d.Str("installation_id", auth.InstallationID)
+	if installationID := InstallationIDFromContext(req.Context()); installationID != "" {
+		d.Str("installation_id", installationID)
 	}
 	if authorization := req.Header.Get("Authorization"); authorization != "" {
 		d.Str("hashed_token", ghtransport.HashToken(authorization))
@@ -209,10 +134,10 @@ func logCacheStatus(resp *http.Response) *zerolog.Event {
 	return d
 }
 
-// logRateLimit parses resp's rate-limit headers into the "ratelimit"
+// logRateLimitDict parses resp's rate-limit headers into the "ratelimit"
 // object of a log line. Returns nil if resp doesn't carry rate-limit
 // headers (e.g. it's not a GitHub API response).
-func logRateLimit(resp *http.Response) *zerolog.Event {
+func logRateLimitDict(resp *http.Response) *zerolog.Event {
 	rate, err := ghratelimit.ParseRate(resp.Header)
 	if err != nil {
 		return nil
@@ -292,19 +217,19 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	reqDict.Str("scheme", req.URL.Scheme)
 	reqDict.Str("host", req.URL.Host)
 	reqDict.Str("path", req.URL.Path)
-	if query := sanitizeQuery(req.URL.RawQuery); query != "" {
-		reqDict.Str("query", query)
+	if req.URL.RawQuery != "" {
+		reqDict.Str("query", req.URL.RawQuery)
 	}
 	if t.LogAddr {
-		if incoming := logAddr(splitHostPort(req.RemoteAddr)); incoming != nil {
+		if incoming := logAddrDict(splitHostPort(req.RemoteAddr)); incoming != nil {
 			reqDict.Dict("incoming", incoming)
 		}
-		if source := logAddr(SrcIPFromContext(req.Context()), ""); source != nil {
+		if source := logAddrDict(SrcIPFromContext(req.Context()), ""); source != nil {
 			reqDict.Dict("source", source)
 		}
 	}
 	if t.LogConn {
-		if conn := logConn(gotConn); conn != nil {
+		if conn := logConnDict(gotConn); conn != nil {
 			reqDict.Dict("conn", conn)
 		}
 	}
@@ -336,7 +261,7 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		if contentType := resp.Header.Get("Content-Type"); contentType != "" {
 			respDict.Str("content_type", contentType)
 		}
-		if rl := logRateLimit(resp); rl != nil {
+		if rl := logRateLimitDict(resp); rl != nil {
 			respDict.Dict("ratelimit", rl)
 		}
 		if t.LogResponseHeaders {

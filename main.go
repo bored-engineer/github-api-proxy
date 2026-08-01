@@ -90,6 +90,7 @@ func reportRateLimit(clientID, installationID, hashedToken string, resourceTypes
 
 func main() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+	zerolog.DurationFieldInteger = true
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
@@ -127,8 +128,8 @@ func main() {
 	logRateLimit := pflag.Bool("log-rate-limit", false, "log requests to the /rate_limit API, normally suppressed since they're issued periodically to poll rate limit status rather than in response to real traffic")
 	logAddr := pflag.Bool("log-addr", false, "log the incoming/source IP and port for each request")
 	logConn := pflag.Bool("log-conn", false, "log details about the underlying network connection used for each request (remote address, whether it was reused, and idle time)")
-	logRequestHeaders := pflag.Bool("log-request-headers", false, "log the full request headers for each request (Authorization/Cookie/Set-Cookie values are always redacted)")
-	logResponseHeaders := pflag.Bool("log-response-headers", false, "log the full response headers for each request (Authorization/Cookie/Set-Cookie values are always redacted)")
+	logRequestHeaders := pflag.Bool("log-request-headers", false, "log the full request headers for each request (the Authorization value, if any, is always replaced with its hash)")
+	logResponseHeaders := pflag.Bool("log-response-headers", false, "log the full response headers for each request (the Authorization value, if any, is always replaced with its hash)")
 	pflag.Parse()
 
 	level, err := zerolog.ParseLevel(*logLevel)
@@ -234,7 +235,7 @@ func main() {
 			dial = WithConnID(transport)
 		}
 		var chain http.RoundTripper = &LoggingTransport{
-			Base:               ghtransport.NewTransport(storage, &UpstreamStatusTransport{Base: dial}),
+			Base:               ghtransport.NewTransport(storage, &LatencyTransport{Base: dial}),
 			LogRateLimit:       *logRateLimit,
 			LogAddr:            *logAddr,
 			LogConn:            *logConn,

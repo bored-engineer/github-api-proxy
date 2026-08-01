@@ -156,8 +156,8 @@ The proxy supports multiple authentication methods that can be used simultaneous
 | `--log-rate-limit` | Log requests to the `/rate_limit` API, normally suppressed since they're issued periodically to poll rate limit status rather than in response to real traffic | `false` |
 | `--log-addr` | Log the `incoming`/`source` IP and port for each request | `false` |
 | `--log-conn` | Log details about the underlying network connection used for each request (remote address, whether it was reused, and idle time) | `false` |
-| `--log-request-headers` | Log the full request headers for each request (`Authorization`/`Cookie`/`Set-Cookie` values are always redacted) | `false` |
-| `--log-response-headers` | Log the full response headers for each request (`Authorization`/`Cookie`/`Set-Cookie` values are always redacted) | `false` |
+| `--log-request-headers` | Log the full request headers for each request (the `Authorization` value, if any, is always replaced with its hash) | `false` |
+| `--log-response-headers` | Log the full response headers for each request (the `Authorization` value, if any, is always replaced with its hash) | `false` |
 
 ## API Endpoints
 
@@ -178,13 +178,14 @@ Each proxied request is logged as a single structured line (`--log-format json`)
 ```json
 {
   "level": "info",
-  "duration": 0.283208,
+  "duration": 283,
   "request": {
     "id": "d9mhc9u9b7rie1ec7kng",
     "method": "GET",
     "scheme": "https",
     "host": "api.github.com",
     "path": "/some/path",
+    "query": "page=2",
     "incoming": {
       "ip": "127.0.0.1",
       "port": "57074"
@@ -197,7 +198,7 @@ Each proxied request is logged as a single structured line (`--log-format json`)
       },
       "reused": true,
       "was_idle": true,
-      "idle_time": 13.270875
+      "idle_time": 13271
     },
     "user_agent": "curl/8.7.1",
     "source": {
@@ -232,8 +233,8 @@ Each proxied request is logged as a single structured line (`--log-format json`)
 - `request.id` uniquely identifies the incoming request (a [xid](https://github.com/rs/xid)); every attempt of the same request retried by `--retries`/`--rate-retry` shares the same `id`, so they can be correlated across log lines.
 - `request.incoming`/`request.source` are only present when `--log-addr` is set. `incoming` is the address of the client that connected to the proxy; `source` is only populated when `--src-ip` was also used, naming the specific source IP that request was dialed from.
 - `request.conn` is only present when `--log-conn` is set, describing the underlying network connection used for this specific attempt (via `httptrace`, so retried attempts can show a different connection). `conn.id` is a unique identifier assigned when the connection is dialed and stays the same across every request that reuses it, so they can be correlated in logs. `conn.remote` is the address of the upstream GitHub server actually connected to (e.g. after DNS re-resolution); `conn.reused` reports whether an existing pooled connection was reused instead of dialing a new one; `conn.idle_time` (only present when `conn.was_idle` is `true`) is how long that reused connection had been sitting idle beforehand.
-- `request.query` is only present when the request has a query string; `access_token`/`client_secret` values are always redacted, matching GitHub's (legacy, but still accepted) query-string authentication forms.
-- `request.headers`/`response.headers` are only present when `--log-request-headers`/`--log-response-headers` are set, respectively. `Authorization`, `Cookie`, and `Set-Cookie` values are always redacted, since `request.auth` already surfaces the credential non-reversibly.
+- `request.query` is only present when the request has a query string, logged verbatim.
+- `request.headers`/`response.headers` are only present when `--log-request-headers`/`--log-response-headers` are set, respectively. The `Authorization` value (if any) is always replaced with its hash (the same value as `request.auth.hashed_token`) rather than logged raw.
 - `request.auth.client_id`/`request.auth.installation_id` are only present for the credential type they apply to (e.g. GitHub Apps set both; OAuth clients set only `client_id`; personal access tokens set neither).
 - `request.auth.hashed_token` matches the `hashed_token` field GitHub itself emits in audit log events, computed from the request's `Authorization` header.
 - `response.cache` is parsed from the upstream `Cache-Status` header (per [RFC 9211](https://www.rfc-editor.org/rfc/rfc9211)), set by caching (via [bored-engineer/github-conditional-http-transport](https://github.com/bored-engineer/github-conditional-http-transport)) on every response; it's omitted only if that header is missing entirely. `cache.hit` is `true` when a conditional request got back a `304 Not Modified` and the cached body/status was substituted (`response.status` then reflects the substituted status, e.g. `200`, not the upstream `304`). `cache.stored` is `true` when this response was freshly written to the cache. `cache.reason` is the forwarding reason for a non-hit (e.g. `uri-miss` on a first request, or `method`/`bypass` for a request caching doesn't apply to at all) and is absent on a hit. `cache.etag` mirrors the response's `Etag` header, if any.

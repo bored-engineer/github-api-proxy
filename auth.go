@@ -5,25 +5,26 @@ import (
 	"net/http"
 )
 
-// authContextKey is the context.Context key under which AuthFields is stored.
-type authContextKey struct{}
+// clientIDContextKey is the context.Context key under which the client ID is stored.
+type clientIDContextKey struct{}
 
-// AuthFields identifies which credential authenticated a request, for
-// logging purposes. Fields are left empty when they don't apply to the
-// credential type (e.g. InstallationID for OAuth clients and personal
-// access tokens). The "hashed_token" log field is computed separately (see
-// logAuth in log.go), directly from the request's Authorization header,
-// rather than stored here.
-type AuthFields struct {
-	ClientID       string
-	InstallationID string
+// installationIDContextKey is the context.Context key under which the installation ID is stored.
+type installationIDContextKey struct{}
+
+// ClientIDFromContext returns the client ID previously stored in ctx by
+// AuthTransport, or "" if none was stored (e.g. the request was
+// authenticated by a personal access token, which has no client ID).
+func ClientIDFromContext(ctx context.Context) string {
+	id, _ := ctx.Value(clientIDContextKey{}).(string)
+	return id
 }
 
-// AuthFieldsFromContext returns the AuthFields previously stored in ctx by
-// AuthTransport, or the zero value if none was stored.
-func AuthFieldsFromContext(ctx context.Context) AuthFields {
-	fields, _ := ctx.Value(authContextKey{}).(AuthFields)
-	return fields
+// InstallationIDFromContext returns the installation ID previously stored
+// in ctx by AuthTransport, or "" if none was stored (e.g. the request
+// wasn't authenticated by a GitHub App installation).
+func InstallationIDFromContext(ctx context.Context) string {
+	id, _ := ctx.Value(installationIDContextKey{}).(string)
+	return id
 }
 
 // AuthTransport identifies which configured credential (ClientID/
@@ -38,7 +39,12 @@ type AuthTransport struct {
 
 // RoundTrip implements http.RoundTripper.
 func (t *AuthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	fields := AuthFields{ClientID: t.ClientID, InstallationID: t.InstallationID}
-	ctx := context.WithValue(req.Context(), authContextKey{}, fields)
+	ctx := req.Context()
+	if t.ClientID != "" {
+		ctx = context.WithValue(ctx, clientIDContextKey{}, t.ClientID)
+	}
+	if t.InstallationID != "" {
+		ctx = context.WithValue(ctx, installationIDContextKey{}, t.InstallationID)
+	}
 	return t.Base.RoundTrip(req.WithContext(ctx))
 }
