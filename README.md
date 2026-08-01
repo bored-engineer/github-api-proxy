@@ -147,6 +147,16 @@ The proxy supports multiple authentication methods that can be used simultaneous
 | `--cache-redis-username` | Redis username | (none) |
 | `--cache-redis-password` | Redis password | (none) |
 | `--cache-redis-db` | Redis database number | `0` |
+| `--retries` | Maximum retries for requests without a body that fail with a network error or a 429/5xx status code (`0` disables retries) | `2` |
+| `--retry-wait` | Initial backoff delay between retries (doubles each attempt, subject to `--retry-wait-max`) | `250ms` |
+| `--retry-wait-max` | Maximum backoff delay between retries | `30s` |
+| `--rate-retry` | Retry 429 responses until `Retry-After` clears, instead of counting them against `--retries` | `true` |
+| `--log-level` | Minimum log level to output (`trace`, `debug`, `info`, `warn`, `error`) | `info` |
+| `--log-format` | Log output format, `console` for human-readable or `json` for structured | `console` |
+| `--log-rate-limit` | Log requests to the `/rate_limit` API, normally suppressed since they're issued periodically to poll rate limit status rather than in response to real traffic | `false` |
+| `--log-addr` | Log the `incoming`/`remote`/`source` IP and port for each request | `false` |
+| `--log-request-headers` | Log the full request headers for each request (`Authorization`/`Cookie`/`Set-Cookie` values are always redacted) | `false` |
+| `--log-response-headers` | Log the full response headers for each request (`Authorization`/`Cookie`/`Set-Cookie` values are always redacted) | `false` |
 
 ## API Endpoints
 
@@ -159,3 +169,62 @@ The proxy exposes Prometheus metrics at `/metrics`:
 
 - `github_rate_limit_remaining` - Number of requests remaining in current rate limit window
 - `github_rate_limit_reset` - Unix timestamp when rate limit window resets
+
+## Logging
+
+Each proxied request is logged as a single structured line (`--log-format json`) or a human-readable line (`--log-format console`, the default), with request- and response-specific fields grouped into nested `request` and `response` objects:
+
+```json
+{
+  "level": "info",
+  "duration": 0.283208,
+  "request": {
+    "id": "d9mhc9u9b7rie1ec7kng",
+    "method": "GET",
+    "url": "https://api.github.com/some/path",
+    "incoming": {
+      "ip": "127.0.0.1",
+      "port": "57074"
+    },
+    "remote": {
+      "ip": "140.82.121.6",
+      "port": "443"
+    },
+    "user_agent": "curl/8.7.1",
+    "source": {
+      "ip": "203.0.113.10"
+    },
+    "auth": {
+      "client_id": "myclient",
+      "installation_id": "12345",
+      "hashed_token": "ZSx9xofZjJiJME7S5AjHS2EehqQMqlHEtD8d1ZE8XNA="
+    }
+  },
+  "response": {
+    "status": 200,
+    "cache": {
+      "etag": "\"abc123\"",
+      "hit": true,
+      "stored": false
+    },
+    "request_id": "ABCD:1234",
+    "ratelimit": {
+      "limit": 5000,
+      "used": 1,
+      "remaining": 4999,
+      "reset": 1234567890,
+      "resource": "core"
+    }
+  },
+  "message": "HTTP request"
+}
+```
+
+- `request.id` uniquely identifies the incoming request (a [xid](https://github.com/rs/xid)); every attempt of the same request retried by `--retries`/`--rate-retry` shares the same `id`, so they can be correlated across log lines.
+- `request.incoming`/`request.remote`/`request.source` are only present when `--log-addr` is set. `incoming` is the address of the client that connected to the proxy; `remote` is the address of the upstream GitHub server this specific attempt actually connected to (captured off the underlying connection, so retried attempts can show a different address, e.g. after DNS re-resolution); `source` is only populated when `--src-ip` was also used, naming the specific source IP that request was dialed from.
+- `request.headers`/`response.headers` are only present when `--log-request-headers`/`--log-response-headers` are set, respectively. `Authorization`, `Cookie`, and `Set-Cookie` values are always redacted, since `request.auth` already surfaces the credential non-reversibly.
+- `request.auth.client_id`/`request.auth.installation_id` are only present for the credential type they apply to (e.g. GitHub Apps set both; OAuth clients set only `client_id`; personal access tokens set neither).
+- `request.auth.hashed_token` matches the `hashed_token` field GitHub itself emits in audit log events, computed from the request's `Authorization` header.
+- `response.cache` is parsed from the upstream `Cache-Status` header (per [RFC 9211](https://www.rfc-editor.org/rfc/rfc9211)), set by caching (via [bored-engineer/github-conditional-http-transport](https://github.com/bored-engineer/github-conditional-http-transport)) on every response; it's omitted only if that header is missing entirely. `cache.hit` is `true` when a conditional request got back a `304 Not Modified` and the cached body/status was substituted (`response.status` then reflects the substituted status, e.g. `200`, not the upstream `304`). `cache.stored` is `true` when this response was freshly written to the cache. `cache.reason` is the forwarding reason for a non-hit (e.g. `uri-miss` on a first request, or `method`/`bypass` for a request caching doesn't apply to at all) and is absent on a hit. `cache.etag` mirrors the response's `Etag` header, if any.
+- `response.ratelimit` is only present when the response carries rate-limit headers (i.e. GitHub API responses), and mirrors `ghratelimit.ParseRate` plus the `X-Ratelimit-Resource` header.
+- Requests to `/rate_limit` (issued periodically to poll rate-limit status) are suppressed by default; pass `--log-rate-limit` to include them.
