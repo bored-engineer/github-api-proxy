@@ -179,7 +179,7 @@ Each proxied request is logged as a single structured JSON line. Request- and re
   "level": "info",
   "duration": 283,
   "request": {
-    "id": "d9mhc9u9b7rie1ec7kng",
+    "id": "d9mn11m9b7rlmqkucu8g",
     "method": "GET",
     "scheme": "https",
     "host": "api.github.com",
@@ -187,17 +187,17 @@ Each proxied request is logged as a single structured JSON line. Request- and re
     "query": "page=2",
     "incoming": {
       "ip": "127.0.0.1",
-      "port": "57074"
+      "port": "60600"
     },
     "conn": {
-      "id": "d9mmc2u9b7rkvbuev3i0",
+      "id": "d9mn10u9b7rlmqkucu7g",
       "remote": {
         "ip": "140.82.121.6",
         "port": "443"
       },
       "reused": true,
       "was_idle": true,
-      "idle_time": 13271
+      "idle_time": 2032
     },
     "user_agent": "curl/8.7.1",
     "source": {
