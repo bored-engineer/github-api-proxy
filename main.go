@@ -115,7 +115,7 @@ func main() {
 	authOAuth := pflag.StringSlice("auth-oauth", nil, "OAuth clients for GitHub API authentication in the format 'client_id:client_secret'")
 	authApp := pflag.StringSlice("auth-app", nil, "GitHub App clients for GitHub API authentication in the format 'client_id:installation_id:private_key'")
 	authToken := pflag.StringSlice("auth-token", nil, "GitHub personal access tokens for GitHub API authentication")
-	rph := pflag.Int("rph", 0, "maximum requests per hour, shared globally across all authentication tokens")
+	rate := pflag.Int("rate", 0, "maximum requests per hour, shared globally across all authentication tokens")
 	rateInterval := pflag.Duration("rate-interval", 60*time.Second, "Interval for rate limit checks")
 	rateResources := pflag.StringSlice("rate-resources", []string{"core", "graphql"}, "Resource types to report rate limit metrics for (empty means report all)")
 	rateReserve := pflag.Bool("rate-reserve", true, "Proactively reserve rate limit capacity for in-flight requests before response headers are parsed")
@@ -316,11 +316,11 @@ func main() {
 		transport = balancing
 	}
 
-	// If RPH is set, apply a single rate limit shared across all
+	// If --rate is set, apply a single rate limit shared across all
 	// credentials/source IPs (rather than one budget per credential), so
 	// the configured throughput is a global cap on the proxy as a whole.
-	if *rph > 0 {
-		transport = ratelimit.New(transport, *rph, ratelimit.Per(time.Hour))
+	if *rate > 0 {
+		transport = ratelimit.New(transport, *rate, ratelimit.Per(time.Hour))
 	}
 
 	// Setup the reverse proxy.
