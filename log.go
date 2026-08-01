@@ -61,38 +61,6 @@ func logAddrDict(ip, port string) *zerolog.Event {
 	return d
 }
 
-// logConnDict builds the "conn" object of a log line from an
-// httptrace.GotConnInfo, describing the underlying network connection used
-// for this specific attempt: local_addr is the source IP/port the proxy
-// dialed out from (e.g. matching a configured --src-ip), and remote_addr is
-// the upstream address it connected to, plus (if known) the connection's
-// unique id. Returns nil if info is nil (e.g. an error occurred before a
-// connection was ever obtained).
-func logConnDict(info *httptrace.GotConnInfo) *zerolog.Event {
-	if info == nil {
-		return nil
-	}
-	d := zerolog.Dict()
-	if info.Conn != nil {
-		if local := logAddrDict(splitHostPort(info.Conn.LocalAddr().String())); local != nil {
-			d.Dict("local_addr", local)
-		}
-		if remote := logAddrDict(splitHostPort(info.Conn.RemoteAddr().String())); remote != nil {
-			if conn, ok := info.Conn.(*xidConn); ok {
-				remote.Str("id", conn.id.String())
-			}
-			d.Dict("remote_addr", remote)
-		}
-	}
-	d.Bool("reused", info.Reused)
-	d.Bool("was_idle", info.WasIdle)
-	if info.WasIdle {
-		// IdleTime is only meaningful when WasIdle is true.
-		d.Dur("idle_time", info.IdleTime)
-	}
-	return d
-}
-
 // logAuth builds the "auth" object of a log line, identifying which
 // credential authenticated req: ClientID/InstallationID come from context
 // (set by AuthTransport for whichever configured credential is in use),
@@ -175,12 +143,18 @@ type LoggingTransport struct {
 	// they are typically noisy since they're issued on a fixed interval
 	// to poll rate limit status rather than in response to real traffic.
 	LogRateLimit bool
-	// LogConn controls whether the "conn" object is logged on the request
-	// (the listener's local_addr and the client's remote_addr, which
-	// carries the incoming connection's id) and on the response
-	// (local_addr/remote_addr, where remote_addr carries the upstream
-	// connection's id, plus reuse and idle time).
-	LogConn bool
+	// LogLocalAddr controls whether each connection's local address is
+	// logged: the listener's address as request.local_addr, and the
+	// address dialed out from (e.g. matching a configured --src-ip) as
+	// response.local_addr.
+	LogLocalAddr bool
+	// LogRemoteAddr controls whether each connection's remote address
+	// (plus its id) is logged: the client's address as
+	// request.remote_addr, and the upstream GitHub server's address as
+	// response.remote_addr. It also controls whether the response's
+	// connection reuse/idle-time stats are logged, since those describe
+	// that same connection.
+	LogRemoteAddr bool
 	// LogRequestHeaders controls whether the full (sanitized) request
 	// headers are logged in the "request" object.
 	LogRequestHeaders bool
@@ -190,11 +164,12 @@ type LoggingTransport struct {
 }
 
 func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	// Trace the underlying connection so we can log its details (remote
-	// address, reuse, idle time) for this specific attempt, regardless of
-	// whether a response (or only an error) comes back.
+	// Trace the underlying connection so we can log its details (local
+	// address, remote address, reuse, idle time) for this specific
+	// attempt, regardless of whether a response (or only an error) comes
+	// back.
 	var gotConn *httptrace.GotConnInfo
-	if t.LogConn {
+	if t.LogLocalAddr || t.LogRemoteAddr {
 		req = req.WithContext(httptrace.WithClientTrace(req.Context(), &httptrace.ClientTrace{
 			GotConn: func(info httptrace.GotConnInfo) {
 				gotConn = &info
@@ -233,18 +208,18 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	if req.URL.RawQuery != "" {
 		reqDict.Str("query", req.URL.RawQuery)
 	}
-	if t.LogConn {
-		conn := zerolog.Dict()
+	if t.LogLocalAddr {
 		if local := logAddrDict(splitHostPort(FromContext[string](req.Context(), ctxConnLocalAddr{}))); local != nil {
-			conn.Dict("local_addr", local)
+			reqDict.Dict("local_addr", local)
 		}
+	}
+	if t.LogRemoteAddr {
 		if remote := logAddrDict(splitHostPort(req.RemoteAddr)); remote != nil {
 			if id := FromContext[xid.ID](req.Context(), ctxConnXID{}); !id.IsNil() {
 				remote.Str("id", id.String())
 			}
-			conn.Dict("remote_addr", remote)
+			reqDict.Dict("remote_addr", remote)
 		}
-		reqDict.Dict("conn", conn)
 	}
 	if userAgent := req.Header.Get("User-Agent"); userAgent != "" {
 		reqDict.Str("user_agent", userAgent)
@@ -259,9 +234,25 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	if resp != nil {
 		respDict := zerolog.Dict()
 		respDict.Int("status", resp.StatusCode)
-		if t.LogConn {
-			if conn := logConnDict(gotConn); conn != nil {
-				respDict.Dict("conn", conn)
+		if gotConn != nil && gotConn.Conn != nil {
+			if t.LogLocalAddr {
+				if local := logAddrDict(splitHostPort(gotConn.Conn.LocalAddr().String())); local != nil {
+					respDict.Dict("local_addr", local)
+				}
+			}
+			if t.LogRemoteAddr {
+				if remote := logAddrDict(splitHostPort(gotConn.Conn.RemoteAddr().String())); remote != nil {
+					if conn, ok := gotConn.Conn.(*xidConn); ok {
+						remote.Str("id", conn.id.String())
+					}
+					respDict.Dict("remote_addr", remote)
+				}
+				respDict.Bool("reused", gotConn.Reused)
+				respDict.Bool("was_idle", gotConn.WasIdle)
+				if gotConn.WasIdle {
+					// IdleTime is only meaningful when WasIdle is true.
+					respDict.Dur("idle_time", gotConn.IdleTime)
+				}
 			}
 		}
 		if cache := logCacheStatus(resp); cache != nil {

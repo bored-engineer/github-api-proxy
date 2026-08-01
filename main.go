@@ -123,7 +123,8 @@ func main() {
 	srcIPs := pflag.StringSlice("src-ip", nil, "Source IP addresses to balance outgoing requests across (round-robin)")
 	logLevel := pflag.String("log-level", "info", "minimum log level to output (trace, debug, info, warn, error)")
 	logRateLimit := pflag.Bool("log-rate-limit", false, "log requests to the /rate_limit API, normally suppressed since they're issued periodically to poll rate limit status rather than in response to real traffic")
-	logConn := pflag.Bool("log-conn", false, "log details about the underlying network connection used for each request (incoming/source address, id, whether it was reused, and idle time)")
+	logLocalAddr := pflag.Bool("log-local-addr", true, "log each connection's local address: the listener's address on request.local_addr, and the address dialed out from (e.g. matching a configured --src-ip) on response.local_addr")
+	logRemoteAddr := pflag.Bool("log-remote-addr", true, "log each connection's remote address plus id: the client's address on request.remote_addr, and the upstream GitHub server's address on response.remote_addr (also enables response reuse/idle-time stats)")
 	logRequestHeaders := pflag.Bool("log-request-headers", false, "log the full request headers for each request (the Authorization value, if any, is always replaced with its hash)")
 	logResponseHeaders := pflag.Bool("log-response-headers", false, "log the full response headers for each request (the Authorization value, if any, is always replaced with its hash)")
 	pprofEnabled := pflag.Bool("pprof", false, "expose net/http/pprof debug endpoints under /pprof/ (WARNING: allows dumping goroutines, heap, and CPU profiles; do not enable on a publicly reachable listener)")
@@ -218,7 +219,8 @@ func main() {
 		chains[idx] = &LoggingTransport{
 			Base:               ghtransport.NewTransport(storage, base),
 			LogRateLimit:       *logRateLimit,
-			LogConn:            *logConn,
+			LogLocalAddr:       *logLocalAddr,
+			LogRemoteAddr:      *logRemoteAddr,
 			LogRequestHeaders:  *logRequestHeaders,
 			LogResponseHeaders: *logResponseHeaders,
 		}
