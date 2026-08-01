@@ -31,6 +31,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
+	"github.com/rs/xid"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/pflag"
@@ -124,8 +125,7 @@ func main() {
 	rateRetry := pflag.Bool("rate-retry", true, "retry 429 responses until Retry-After clears, instead of counting them against --retries")
 	logLevel := pflag.String("log-level", "info", "minimum log level to output (trace, debug, info, warn, error)")
 	logRateLimit := pflag.Bool("log-rate-limit", false, "log requests to the /rate_limit API, normally suppressed since they're issued periodically to poll rate limit status rather than in response to real traffic")
-	logAddr := pflag.Bool("log-addr", false, "log the incoming/source IP and port for each request")
-	logConn := pflag.Bool("log-conn", false, "log details about the underlying network connection used for each request (remote address, whether it was reused, and idle time)")
+	logConn := pflag.Bool("log-conn", false, "log details about the underlying network connection used for each request (incoming/source address, id, whether it was reused, and idle time)")
 	logRequestHeaders := pflag.Bool("log-request-headers", false, "log the full request headers for each request (the Authorization value, if any, is always replaced with its hash)")
 	logResponseHeaders := pflag.Bool("log-response-headers", false, "log the full response headers for each request (the Authorization value, if any, is always replaced with its hash)")
 	pflag.Parse()
@@ -210,24 +210,14 @@ func main() {
 	// report both the status the caching layer returns and (via context)
 	// the raw upstream status, giving one full chain per source IP.
 	chains := make([]http.RoundTripper, len(srcIPDials))
-	for i, dial := range srcIPDials {
-		// Tag each newly dialed connection with a unique ID (retrievable
-		// via ConnID) so LoggingTransport can log it in the "conn" object.
-		if transport, ok := dial.(*http.Transport); ok {
-			dial = WithConnID(transport)
-		}
-		var chain http.RoundTripper = &LoggingTransport{
+	for idx, dial := range srcIPDials {
+		chains[idx] = &LoggingTransport{
 			Base:               ghtransport.NewTransport(storage, &LatencyTransport{Base: dial}),
 			LogRateLimit:       *logRateLimit,
-			LogAddr:            *logAddr,
 			LogConn:            *logConn,
 			LogRequestHeaders:  *logRequestHeaders,
 			LogResponseHeaders: *logResponseHeaders,
 		}
-		if len(*srcIPs) > 0 {
-			chain = &ContextTransport{Base: chain, Key: srcIPContextKey{}, Value: (*srcIPs)[i]}
-		}
-		chains[i] = chain
 	}
 
 	// The default transport balances requests across all source IPs.
@@ -249,9 +239,10 @@ func main() {
 			if !ok {
 				log.Fatal().Str("params", params).Msg("invalid OAuth client")
 			}
-			authTransport, err := ghauth.Basic(&AuthTransport{
-				ClientID: clientID,
-				Base:     newBaseTransport(),
+			authTransport, err := ghauth.Basic(&ContextTransport{
+				Base:  newBaseTransport(),
+				Key:   ctxAuthClientID{},
+				Value: clientID,
 			}, clientID, clientSecret)
 			if err != nil {
 				log.Fatal().Err(err).Str("client_id", clientID).Msg("ghauth.Basic failed")
@@ -281,10 +272,14 @@ func main() {
 			}
 			balancing = append(balancing, &ghratelimit.Transport{
 				Base: &oauth2.Transport{
-					Base: &AuthTransport{
-						ClientID:       clientID,
-						InstallationID: installationID,
-						Base:           newBaseTransport(),
+					Base: &ContextTransport{
+						Base: &ContextTransport{
+							Base:  newBaseTransport(),
+							Key:   ctxAuthClientID{},
+							Value: clientID,
+						},
+						Key:   ctxAuthInstallationID{},
+						Value: installationID,
 					},
 					Source: ts,
 				},
@@ -300,7 +295,7 @@ func main() {
 			hashedToken := base64.StdEncoding.EncodeToString(hashed[:])
 			balancing = append(balancing, &ghratelimit.Transport{
 				Base: &oauth2.Transport{
-					Base:   &AuthTransport{Base: newBaseTransport()},
+					Base:   newBaseTransport(),
 					Source: oauth2.StaticTokenSource(ghauth.Token(token)),
 				},
 				Limits: ghratelimit.Limits{
@@ -330,11 +325,6 @@ func main() {
 	if *retries > 0 || *rateRetry {
 		transport = &RetryTransport{Base: transport, MaxRetries: *retries, RateRetry: *rateRetry, Wait: *retryWait, MaxWait: *retryWaitMax}
 	}
-
-	// Assign a unique ID to each incoming request, regardless of how the
-	// transport chain above is configured, so retried attempts of the same
-	// request (by RetryTransport) can be correlated across log lines.
-	transport = &RequestIDTransport{Base: transport}
 
 	// Setup the reverse proxy.
 	proxy := &httputil.ReverseProxy{
@@ -376,7 +366,12 @@ func main() {
 
 	// Start the HTTP server on each listener.
 	server := &http.Server{
-		Handler: mux,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mux.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxXID{}, xid.New())))
+		}),
+		ConnContext: func(ctx context.Context, c net.Conn) context.Context {
+			return context.WithValue(ctx, ctxConnXID{}, xid.New())
+		},
 	}
 	for _, listener := range listeners {
 		go func() {

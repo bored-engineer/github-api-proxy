@@ -9,8 +9,17 @@ import (
 
 	ghtransport "github.com/bored-engineer/github-conditional-http-transport"
 	ghratelimit "github.com/bored-engineer/github-rate-limit-http-transport"
+	"github.com/rs/xid"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+)
+
+type (
+	ctxXID                struct{}
+	ctxConnXID            struct{}
+	ctxSourceIP           struct{}
+	ctxAuthClientID       struct{}
+	ctxAuthInstallationID struct{}
 )
 
 // splitHostPort splits a "host:port" address into its parts, returning
@@ -61,8 +70,8 @@ func logConnDict(info *httptrace.GotConnInfo) *zerolog.Event {
 		return nil
 	}
 	d := zerolog.Dict()
-	if id := ConnID(info.Conn); id != "" {
-		d.Str("id", id)
+	if conn, ok := info.Conn.(*xidConn); ok {
+		d.Str("id", conn.id.String())
 	}
 	if info.Conn != nil {
 		if remote := logAddrDict(splitHostPort(info.Conn.RemoteAddr().String())); remote != nil {
@@ -87,10 +96,10 @@ func logConnDict(info *httptrace.GotConnInfo) *zerolog.Event {
 // --auth-* credential.
 func logAuth(req *http.Request) *zerolog.Event {
 	d := zerolog.Dict()
-	if clientID := ClientIDFromContext(req.Context()); clientID != "" {
+	if clientID := FromContext[string](req.Context(), ctxAuthClientID{}); clientID != "" {
 		d.Str("client_id", clientID)
 	}
-	if installationID := InstallationIDFromContext(req.Context()); installationID != "" {
+	if installationID := FromContext[string](req.Context(), ctxAuthInstallationID{}); installationID != "" {
 		d.Str("installation_id", installationID)
 	}
 	if authorization := req.Header.Get("Authorization"); authorization != "" {
@@ -160,13 +169,10 @@ type LoggingTransport struct {
 	// they are typically noisy since they're issued on a fixed interval
 	// to poll rate limit status rather than in response to real traffic.
 	LogRateLimit bool
-	// LogAddr controls whether the "incoming" and "source" address objects
-	// are logged.
-	LogAddr bool
-	// LogConn controls whether the "conn" object (the underlying network
-	// connection's remote address, reuse, and idle time) is logged. This
-	// requires an httptrace.ClientTrace on every request, so it's kept
-	// separate from LogAddr.
+	// LogConn controls whether the "conn" (incoming connection ID and
+	// address, plus, on the response, the upstream connection's remote
+	// address, reuse, and idle time) and "source" address objects are
+	// logged.
 	LogConn bool
 	// LogRequestHeaders controls whether the full (sanitized) request
 	// headers are logged in the "request" object.
@@ -210,8 +216,8 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 
 	// Build the "request" object.
 	reqDict := zerolog.Dict()
-	if id := RequestIDFromContext(req.Context()); id != "" {
-		reqDict.Str("id", id)
+	if id := FromContext[xid.ID](req.Context(), ctxXID{}); !id.IsNil() {
+		reqDict.Str("id", id.String())
 	}
 	reqDict.Str("method", req.Method)
 	reqDict.Str("scheme", req.URL.Scheme)
@@ -220,17 +226,17 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	if req.URL.RawQuery != "" {
 		reqDict.Str("query", req.URL.RawQuery)
 	}
-	if t.LogAddr {
-		if incoming := logAddrDict(splitHostPort(req.RemoteAddr)); incoming != nil {
-			reqDict.Dict("incoming", incoming)
-		}
-		if source := logAddrDict(SrcIPFromContext(req.Context()), ""); source != nil {
-			reqDict.Dict("source", source)
-		}
-	}
 	if t.LogConn {
-		if conn := logConnDict(gotConn); conn != nil {
-			reqDict.Dict("conn", conn)
+		conn := zerolog.Dict()
+		if id := FromContext[xid.ID](req.Context(), ctxConnXID{}); !id.IsNil() {
+			conn.Str("id", id.String())
+		}
+		if addr := logAddrDict(splitHostPort(req.RemoteAddr)); addr != nil {
+			conn.Dict("addr", addr)
+		}
+		reqDict.Dict("conn", conn)
+		if source := logAddrDict(FromContext[string](req.Context(), ctxSourceIP{}), ""); source != nil {
+			reqDict.Dict("source", source)
 		}
 	}
 	if userAgent := req.Header.Get("User-Agent"); userAgent != "" {
@@ -246,11 +252,16 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	if resp != nil {
 		respDict := zerolog.Dict()
 		respDict.Int("status", resp.StatusCode)
+		if t.LogConn {
+			if conn := logConnDict(gotConn); conn != nil {
+				respDict.Dict("conn", conn)
+			}
+		}
 		if cache := logCacheStatus(resp); cache != nil {
 			respDict.Dict("cache", cache)
 		}
 		if resp.ContentLength > 0 {
-			respDict.Int64("size", resp.ContentLength)
+			respDict.Int64("content_length", resp.ContentLength)
 		}
 		if requestID := resp.Header.Get("X-Github-Request-Id"); requestID != "" {
 			respDict.Str("request_id", requestID)
