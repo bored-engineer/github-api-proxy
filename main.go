@@ -282,7 +282,7 @@ func main() {
 			balancing = append(balancing, &ghratelimit.Transport{
 				Base: &oauth2.Transport{
 					Base: &AuthTransport{
-						ClientID:       appID,
+						ClientID:       clientID,
 						InstallationID: installationID,
 						Base:           newBaseTransport(),
 					},

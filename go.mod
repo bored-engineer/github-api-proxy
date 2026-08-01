@@ -18,7 +18,6 @@ require (
 	github.com/rs/xid v1.6.0
 	github.com/rs/zerolog v1.34.0
 	github.com/spf13/pflag v1.0.10
-	go.uber.org/ratelimit v0.3.1
 	golang.org/x/oauth2 v0.34.0
 )
 
@@ -72,6 +71,7 @@ require (
 	github.com/prometheus/procfs v0.19.2 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	go.uber.org/atomic v1.9.0 // indirect
+	go.uber.org/ratelimit v0.3.1 // indirect
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	golang.org/x/exp v0.0.0-20260112195511-716be5621a96 // indirect
 	golang.org/x/text v0.33.0 // indirect
