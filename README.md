@@ -5,7 +5,7 @@ A high-performance reverse proxy for the GitHub REST API that provides authentic
 ## Features
 
 - **Authentication Balancing**: Distribute requests across multiple GitHub tokens/apps
-- **Rate Limiting**: Built-in rate limiting with configurable requests per second
+- **Rate Limiting**: Built-in rate limiting with configurable requests per hour
 - **Caching**: Multiple storage backends (in-memory, PebbleDB, BoltDB, S3, Redis) for response caching using [bored-engineer/github-conditional-http-transport](https://github.com/bored-engineer/github-conditional-http-transport)
 - **Monitoring**: Prometheus metrics for rate limit tracking
 
@@ -104,7 +104,7 @@ Caching is disabled by default; pass one of the flags below to enable it.
 
 ```bash
 # Limit to 5000 requests per hour, shared globally across all authentication tokens
-./github-api-proxy --rph 5000
+./github-api-proxy --rate 5000
 ```
 
 ### Custom GitHub API URL
@@ -132,11 +132,11 @@ Caching is disabled by default; pass one of the flags below to enable it.
 | `--auth-token` | GitHub personal access token | (none) |
 | `--auth-oauth` | OAuth client ID/secret (format: `client_id:client_secret`) | (none) |
 | `--auth-app` | GitHub App clients (format: `client_id:installation_id:private_key`) | (none) |
-| `--rph` | Maximum requests per hour, shared globally across all authentication tokens | (unlimited) |
+| `--rate` | Maximum requests per hour, shared globally across all authentication tokens | (unlimited) |
 | `--rate-interval` | Interval for rate limit checks | `1m0s` |
 | `--rate-resources` | Resource types to report rate limit metrics for (empty means report all) | `core,graphql` |
 | `--rate-reserve` | Proactively reserve rate limit capacity for in-flight requests before response headers are parsed | `true` |
-| `--rate-spoof` | Return a synthetic 429 response instead of forwarding requests once a credential's rate limit is exhausted | `true` |
+| `--rate-spoof` | Return a synthetic 403 response instead of forwarding requests once a credential's rate limit is exhausted | `true` |
 | `--src-ip` | Source IP addresses to balance outgoing requests across (round-robin) | (none) |
 | `--cache-memory` | Use an in-memory cache for conditional requests | `false` |
 | `--cache-bbolt-db` | Path to BoltDB for caching | (disabled) |
@@ -150,14 +150,9 @@ Caching is disabled by default; pass one of the flags below to enable it.
 | `--cache-redis-username` | Redis username | (none) |
 | `--cache-redis-password` | Redis password | (none) |
 | `--cache-redis-db` | Redis database number | `0` |
-| `--retries` | Maximum retries for requests without a body that fail with a network error or a 429/5xx status code (`0` disables retries) | `2` |
-| `--retry-wait` | Initial backoff delay between retries (doubles each attempt, subject to `--retry-wait-max`) | `250ms` |
-| `--retry-wait-max` | Maximum backoff delay between retries | `30s` |
-| `--rate-retry` | Retry 429 responses until `Retry-After` clears, instead of counting them against `--retries` | `true` |
 | `--log-level` | Minimum log level to output (`trace`, `debug`, `info`, `warn`, `error`) | `info` |
 | `--log-rate-limit` | Log requests to the `/rate_limit` API, normally suppressed since they're issued periodically to poll rate limit status rather than in response to real traffic | `false` |
-| `--log-addr` | Log the `incoming`/`source` IP and port for each request | `false` |
-| `--log-conn` | Log details about the underlying network connection used for each request (remote address, whether it was reused, and idle time) | `false` |
+| `--log-conn` | Log details about the underlying network connection used for each request (incoming/source address, id, whether it was reused, and idle time) | `false` |
 | `--log-request-headers` | Log the full request headers for each request (the `Authorization` value, if any, is always replaced with its hash) | `false` |
 | `--log-response-headers` | Log the full response headers for each request (the `Authorization` value, if any, is always replaced with its hash) | `false` |
 | `--pprof` | Expose `net/http/pprof` debug endpoints under `/pprof/` (WARNING: allows dumping goroutines, heap, and CPU profiles; do not enable on a publicly reachable listener) | `false` |
@@ -190,24 +185,17 @@ Each proxied request is logged as a single structured JSON line. Request- and re
     "host": "api.github.com",
     "path": "/some/path",
     "query": "page=2",
-    "incoming": {
-      "ip": "127.0.0.1",
-      "port": "60600"
-    },
     "conn": {
       "id": "d9mn10u9b7rlmqkucu7g",
-      "remote": {
-        "ip": "140.82.121.6",
-        "port": "443"
-      },
-      "reused": true,
-      "was_idle": true,
-      "idle_time": 2032
+      "addr": {
+        "ip": "127.0.0.1",
+        "port": "60600"
+      }
     },
-    "user_agent": "curl/8.7.1",
     "source": {
       "ip": "203.0.113.10"
     },
+    "user_agent": "curl/8.7.1",
     "auth": {
       "client_id": "myclient",
       "installation_id": "12345",
@@ -216,6 +204,15 @@ Each proxied request is logged as a single structured JSON line. Request- and re
   },
   "response": {
     "status": 200,
+    "conn": {
+      "remote": {
+        "ip": "140.82.121.6",
+        "port": "443"
+      },
+      "reused": true,
+      "was_idle": true,
+      "idle_time": 2032
+    },
     "cache": {
       "etag": "\"abc123\"",
       "hit": true,
@@ -234,9 +231,9 @@ Each proxied request is logged as a single structured JSON line. Request- and re
 }
 ```
 
-- `request.id` uniquely identifies the incoming request (a [xid](https://github.com/rs/xid)); every attempt of the same request retried by `--retries`/`--rate-retry` shares the same `id`, so they can be correlated across log lines.
-- `request.incoming`/`request.source` are only present when `--log-addr` is set. `incoming` is the address of the client that connected to the proxy; `source` is only populated when `--src-ip` was also used, naming the specific source IP that request was dialed from.
-- `request.conn` is only present when `--log-conn` is set, describing the underlying network connection used for this specific attempt (via `httptrace`, so retried attempts can show a different connection). `conn.id` is a unique identifier assigned when the connection is dialed and stays the same across every request that reuses it, so they can be correlated in logs. `conn.remote` is the address of the upstream GitHub server actually connected to (e.g. after DNS re-resolution); `conn.reused` reports whether an existing pooled connection was reused instead of dialing a new one; `conn.idle_time` (only present when `conn.was_idle` is `true`) is how long that reused connection had been sitting idle beforehand.
+- `request.id` uniquely identifies the incoming request (a [xid](https://github.com/rs/xid)).
+- `request.conn`/`request.source` are only present when `--log-conn` is set. `request.conn` is the incoming connection from the client to the proxy: `conn.id` is a unique identifier assigned when the connection is accepted and stays the same across every request that reuses it, so they can be correlated in logs; `conn.addr` is the client's address. `request.source` is only populated when `--src-ip` was also used, naming the specific source IP that request was dialed from.
+- `response.conn` is only present when `--log-conn` is set, describing the underlying network connection used to reach the upstream GitHub server (via `httptrace`). `conn.remote` is the address of the upstream GitHub server actually connected to (e.g. after DNS re-resolution); `conn.reused` reports whether an existing pooled connection was reused instead of dialing a new one; `conn.idle_time` (only present when `conn.was_idle` is `true`) is how long that reused connection had been sitting idle beforehand.
 - `request.query` is only present when the request has a query string, logged verbatim.
 - `request.headers`/`response.headers` are only present when `--log-request-headers`/`--log-response-headers` are set, respectively. The `Authorization` value (if any) is always replaced with its hash (the same value as `request.auth.hashed_token`) rather than logged raw.
 - `request.auth.client_id`/`request.auth.installation_id` are only present for the credential type they apply to (e.g. GitHub Apps set both; OAuth clients set only `client_id`; personal access tokens set neither).
