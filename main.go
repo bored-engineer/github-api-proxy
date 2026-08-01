@@ -127,7 +127,7 @@ func main() {
 	logRequestRemoteAddr := pflag.Bool("log-request-remote-addr", true, "log the client's address, plus the incoming connection's id, as request.conn.remote")
 	logResponseLocalAddr := pflag.Bool("log-response-local-addr", true, "log the address the proxy dialed out from (e.g. matching a configured --src-ip) as response.conn.local")
 	logResponseRemoteAddr := pflag.Bool("log-response-remote-addr", true, "log the upstream GitHub server's address, plus the connection's id, as response.conn.remote")
-	logResponseConnReuse := pflag.Bool("log-response-conn-reuse", true, "log whether the upstream connection used for each request was freshly dialed or reused from the pool (response.conn.remote.reused, was_idle, idle_time)")
+	logResponseConnReuse := pflag.Bool("log-response-conn-reuse", true, "log whether the upstream connection used for each request was freshly dialed or reused from the pool (response.conn.remote.reused, response.conn.remote.was_idle, response.conn.remote.idle_time)")
 	logRequestHeaders := pflag.Bool("log-request-headers", false, "log the full request headers for each request (the Authorization value, if any, is always replaced with its hash)")
 	logResponseHeaders := pflag.Bool("log-response-headers", false, "log the full response headers for each request (the Authorization value, if any, is always replaced with its hash)")
 	pprofEnabled := pflag.Bool("pprof", false, "expose net/http/pprof debug endpoints under /pprof/ (WARNING: allows dumping goroutines, heap, and CPU profiles; do not enable on a publicly reachable listener)")
