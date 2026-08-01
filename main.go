@@ -121,10 +121,6 @@ func main() {
 	rateReserve := pflag.Bool("rate-reserve", true, "Proactively reserve rate limit capacity for in-flight requests before response headers are parsed")
 	rateSpoof := pflag.Bool("rate-spoof", true, "Return a synthetic 429 response instead of forwarding requests once a credential's rate limit is exhausted")
 	srcIPs := pflag.StringSlice("src-ip", nil, "Source IP addresses to balance outgoing requests across (round-robin)")
-	retries := pflag.Int("retries", 2, "maximum retries for requests without a body that fail with a network error or a 429/5xx status code (0 disables retries)")
-	retryWait := pflag.Duration("retry-wait", 250*time.Millisecond, "initial backoff delay between retries (doubles each attempt, subject to --retry-wait-max)")
-	retryWaitMax := pflag.Duration("retry-wait-max", 30*time.Second, "maximum backoff delay between retries")
-	rateRetry := pflag.Bool("rate-retry", true, "retry 429 responses until Retry-After clears, instead of counting them against --retries")
 	logLevel := pflag.String("log-level", "info", "minimum log level to output (trace, debug, info, warn, error)")
 	logRateLimit := pflag.Bool("log-rate-limit", false, "log requests to the /rate_limit API, normally suppressed since they're issued periodically to poll rate limit status rather than in response to real traffic")
 	logConn := pflag.Bool("log-conn", false, "log details about the underlying network connection used for each request (incoming/source address, id, whether it was reused, and idle time)")
@@ -325,13 +321,6 @@ func main() {
 	// the configured throughput is a global cap on the proxy as a whole.
 	if *rph > 0 {
 		transport = ratelimit.New(transport, *rph, ratelimit.Per(time.Hour))
-	}
-
-	// Retry requests that fail with a network error or a 429/5xx status,
-	// after balancing/rate-limiting so each attempt (including retries)
-	// counts against the same global rate limit.
-	if *retries > 0 || *rateRetry {
-		transport = &RetryTransport{Base: transport, MaxRetries: *retries, RateRetry: *rateRetry, Wait: *retryWait, MaxWait: *retryWaitMax}
 	}
 
 	// Setup the reverse proxy.
