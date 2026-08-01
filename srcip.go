@@ -6,6 +6,8 @@ import (
 	"net"
 	"net/http"
 	"sync/atomic"
+
+	"github.com/rs/xid"
 )
 
 // RoundRobinTransport balances requests across multiple http.RoundTrippers,
@@ -29,37 +31,45 @@ func RoundRobin(transports []http.RoundTripper) http.RoundTripper {
 	return &RoundRobinTransport{Transports: transports}
 }
 
-// srcIPContextKey is the context.Context key under which the source IP is
-// stored (via ContextTransport).
-type srcIPContextKey struct{}
-
-// SrcIPFromContext returns the source IP previously stored in ctx (via
-// ContextTransport), or "" if none was stored (i.e. --src-ip wasn't used).
-func SrcIPFromContext(ctx context.Context) string {
-	ip, _ := ctx.Value(srcIPContextKey{}).(string)
-	return ip
+type xidConn struct {
+	net.Conn
+	id xid.ID
 }
 
 // SrcIPTransports parses addrs and returns one dedicated http.Transport
 // (and connection pool) per source IP, so each source IP gets its own set
 // of connections rather than sharing/reusing dials. If addrs is empty,
-// base is returned directly as the sole transport.
+// the default LocalAddr is used.
 func SrcIPTransports(addrs []string, base http.RoundTripper) ([]http.RoundTripper, error) {
 	if len(addrs) == 0 {
-		return []http.RoundTripper{base}, nil
+		addrs = []string{""} // No source IP, use default dialer LocalAddr.
 	}
 	transports := make([]http.RoundTripper, len(addrs))
 	for idx, addr := range addrs {
+		dialer := new(net.Dialer)
 		ip := net.ParseIP(addr)
-		if ip == nil {
+		if ip != nil {
+			dialer.LocalAddr = &net.TCPAddr{IP: ip, Port: 0}
+		} else if addr != "" {
 			return nil, fmt.Errorf("net.ParseIP failed: %q", addr)
 		}
-		dialer := &net.Dialer{
-			LocalAddr: &net.TCPAddr{IP: ip, Port: 0},
-		}
 		transport := http.DefaultTransport.(*http.Transport).Clone()
-		transport.DialContext = dialer.DialContext
-		transports[idx] = transport
+		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			conn, err := dialer.DialContext(ctx, network, addr)
+			if conn != nil {
+				conn = &xidConn{Conn: conn, id: xid.New()}
+			}
+			return conn, err
+		}
+		if ip != nil {
+			transports[idx] = &ContextTransport{
+				Base:  transport,
+				Key:   ctxSourceIP{},
+				Value: ip.String(),
+			}
+		} else {
+			transports[idx] = transport
+		}
 	}
 	return transports, nil
 }
