@@ -162,11 +162,11 @@ type LoggingTransport struct {
 	// server's address (plus the connection's id) is logged as
 	// response.conn.remote.
 	LogResponseRemoteAddr bool
-	// LogConnReuse controls whether connection reuse stats (reused,
+	// LogResponseConnReuse controls whether connection reuse stats (reused,
 	// was_idle, idle_time) are logged under response.conn.remote,
 	// describing whether the upstream connection used for this request
 	// was freshly dialed or reused from the pool.
-	LogConnReuse bool
+	LogResponseConnReuse bool
 	// LogRequestHeaders controls whether the full (sanitized) request
 	// headers are logged in the "request" object.
 	LogRequestHeaders bool
@@ -181,7 +181,7 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	// attempt, regardless of whether a response (or only an error) comes
 	// back.
 	var gotConn *httptrace.GotConnInfo
-	if t.LogResponseLocalAddr || t.LogResponseRemoteAddr || t.LogConnReuse {
+	if t.LogResponseLocalAddr || t.LogResponseRemoteAddr || t.LogResponseConnReuse {
 		req = req.WithContext(httptrace.WithClientTrace(req.Context(), &httptrace.ClientTrace{
 			GotConn: func(info httptrace.GotConnInfo) {
 				gotConn = &info
@@ -250,14 +250,14 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	if resp != nil {
 		respDict := zerolog.Dict()
 		respDict.Int("status", resp.StatusCode)
-		if gotConn != nil && gotConn.Conn != nil && (t.LogResponseLocalAddr || t.LogResponseRemoteAddr || t.LogConnReuse) {
+		if gotConn != nil && gotConn.Conn != nil && (t.LogResponseLocalAddr || t.LogResponseRemoteAddr || t.LogResponseConnReuse) {
 			conn := zerolog.Dict()
 			if t.LogResponseLocalAddr {
 				if local := logAddrDict(gotConn.Conn.LocalAddr().String()); local != nil {
 					conn.Dict("local", local)
 				}
 			}
-			if t.LogResponseRemoteAddr || t.LogConnReuse {
+			if t.LogResponseRemoteAddr || t.LogResponseConnReuse {
 				remote := zerolog.Dict()
 				if t.LogResponseRemoteAddr {
 					addAddrFields(remote, gotConn.Conn.RemoteAddr().String())
@@ -265,7 +265,7 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 						remote.Str("id", xc.id.String())
 					}
 				}
-				if t.LogConnReuse {
+				if t.LogResponseConnReuse {
 					remote.Bool("reused", gotConn.Reused)
 					remote.Bool("was_idle", gotConn.WasIdle)
 					if gotConn.WasIdle {
