@@ -384,7 +384,9 @@ func main() {
 			mux.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxXID{}, xid.New())))
 		}),
 		ConnContext: func(ctx context.Context, c net.Conn) context.Context {
-			return context.WithValue(ctx, ctxConnXID{}, xid.New())
+			ctx = context.WithValue(ctx, ctxConnXID{}, xid.New())
+			ctx = context.WithValue(ctx, ctxConnLocalAddr{}, c.LocalAddr().String())
+			return ctx
 		},
 	}
 	for _, listener := range listeners {

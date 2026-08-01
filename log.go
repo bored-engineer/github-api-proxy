@@ -17,7 +17,7 @@ import (
 type (
 	ctxXID                struct{}
 	ctxConnXID            struct{}
-	ctxSourceIP           struct{}
+	ctxConnLocalAddr      struct{}
 	ctxAuthClientID       struct{}
 	ctxAuthInstallationID struct{}
 )
@@ -63,8 +63,10 @@ func logAddrDict(ip, port string) *zerolog.Event {
 
 // logConnDict builds the "conn" object of a log line from an
 // httptrace.GotConnInfo, describing the underlying network connection used
-// for this specific attempt. Returns nil if info is nil (e.g. an error
-// occurred before a connection was ever obtained).
+// for this specific attempt: local_addr is the source IP/port the proxy
+// dialed out from (e.g. matching a configured --src-ip), and remote_addr is
+// the upstream address it connected to. Returns nil if info is nil (e.g. an
+// error occurred before a connection was ever obtained).
 func logConnDict(info *httptrace.GotConnInfo) *zerolog.Event {
 	if info == nil {
 		return nil
@@ -74,8 +76,11 @@ func logConnDict(info *httptrace.GotConnInfo) *zerolog.Event {
 		d.Str("id", conn.id.String())
 	}
 	if info.Conn != nil {
+		if local := logAddrDict(splitHostPort(info.Conn.LocalAddr().String())); local != nil {
+			d.Dict("local_addr", local)
+		}
 		if remote := logAddrDict(splitHostPort(info.Conn.RemoteAddr().String())); remote != nil {
-			d.Dict("remote", remote)
+			d.Dict("remote_addr", remote)
 		}
 	}
 	d.Bool("reused", info.Reused)
@@ -169,10 +174,10 @@ type LoggingTransport struct {
 	// they are typically noisy since they're issued on a fixed interval
 	// to poll rate limit status rather than in response to real traffic.
 	LogRateLimit bool
-	// LogConn controls whether the "conn" (incoming connection ID and
-	// address, plus, on the response, the upstream connection's remote
-	// address, reuse, and idle time) and "source" address objects are
-	// logged.
+	// LogConn controls whether the "conn" object is logged on the request
+	// (incoming connection ID, the client's remote_addr, and the
+	// listener's local_addr) and on the response (the upstream
+	// connection's ID, local_addr/remote_addr, reuse, and idle time).
 	LogConn bool
 	// LogRequestHeaders controls whether the full (sanitized) request
 	// headers are logged in the "request" object.
@@ -231,13 +236,13 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		if id := FromContext[xid.ID](req.Context(), ctxConnXID{}); !id.IsNil() {
 			conn.Str("id", id.String())
 		}
-		if addr := logAddrDict(splitHostPort(req.RemoteAddr)); addr != nil {
-			conn.Dict("addr", addr)
+		if local := logAddrDict(splitHostPort(FromContext[string](req.Context(), ctxConnLocalAddr{}))); local != nil {
+			conn.Dict("local_addr", local)
+		}
+		if remote := logAddrDict(splitHostPort(req.RemoteAddr)); remote != nil {
+			conn.Dict("remote_addr", remote)
 		}
 		reqDict.Dict("conn", conn)
-		if source := logAddrDict(FromContext[string](req.Context(), ctxSourceIP{}), ""); source != nil {
-			reqDict.Dict("source", source)
-		}
 	}
 	if userAgent := req.Header.Get("User-Agent"); userAgent != "" {
 		reqDict.Str("user_agent", userAgent)
