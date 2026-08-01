@@ -4,6 +4,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptrace"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -41,6 +42,35 @@ func sanitizeHeaders(headers http.Header) http.Header {
 		}
 	}
 	return sanitized
+}
+
+// sensitiveQueryParams are query parameter names redacted by sanitizeQuery
+// before logging, since GitHub's (legacy, but still accepted) query-string
+// authentication forms carry a credential there rather than in a header.
+var sensitiveQueryParams = []string{"access_token", "client_secret"}
+
+// sanitizeQuery returns rawQuery with sensitiveQueryParams values redacted,
+// safe to log verbatim. If rawQuery isn't well-formed enough to parse, or
+// none of sensitiveQueryParams are present, it's returned unchanged.
+func sanitizeQuery(rawQuery string) string {
+	if rawQuery == "" {
+		return ""
+	}
+	values, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return rawQuery
+	}
+	var redacted bool
+	for _, name := range sensitiveQueryParams {
+		if values.Has(name) {
+			values.Set(name, "REDACTED")
+			redacted = true
+		}
+	}
+	if !redacted {
+		return rawQuery
+	}
+	return values.Encode()
 }
 
 var (
@@ -162,17 +192,55 @@ func (a addrFields) MarshalZerologObject(e *zerolog.Event) {
 	}
 }
 
+// connFields renders the "conn" object of a log line, describing the
+// underlying network connection used for this specific attempt (captured
+// via httptrace.GotConnInfo).
+type connFields struct {
+	// ID uniquely identifies the underlying connection (assigned once when
+	// it's dialed, via WithConnID), stable across every request that
+	// reuses it, so they can be correlated in logs.
+	ID string
+	// Remote is the address of the upstream (GitHub) server this
+	// connection is actually established with.
+	Remote  addrFields
+	Reused  bool
+	WasIdle bool
+	// IdleTime reports how long the connection was previously idle, only
+	// meaningful (and only logged) when WasIdle is true.
+	IdleTime time.Duration
+}
+
+// MarshalZerologObject implements zerolog.LogObjectMarshaler.
+func (c connFields) MarshalZerologObject(e *zerolog.Event) {
+	if c.ID != "" {
+		e.Str("id", c.ID)
+	}
+	if !c.Remote.Empty() {
+		e.Object("remote", c.Remote)
+	}
+	e.Bool("reused", c.Reused)
+	e.Bool("was_idle", c.WasIdle)
+	if c.WasIdle {
+		e.Dur("idle_time", c.IdleTime)
+	}
+}
+
 // requestFields renders the "request" object of a log line.
 type requestFields struct {
 	ID     string
 	Method string
-	URL    string
+	Scheme string
+	Host   string
+	Path   string
+	// Query is the (sanitized) raw query string, without the leading "?".
+	Query string
 	// Incoming is the address of the client that connected to the proxy
 	// (i.e. the inbound *http.Request's RemoteAddr).
 	Incoming addrFields
-	// Remote is the address of the upstream (GitHub) server this specific
-	// attempt actually connected to, captured via httptrace.
-	Remote    addrFields
+	// Conn describes the underlying network connection used for this
+	// attempt, non-nil only if --log-conn was set (since it requires an
+	// httptrace.ClientTrace on every request).
+	Conn      *connFields
 	UserAgent string
 	// Source is the IP this request was dialed from, set only if --src-ip was used.
 	Source addrFields
@@ -188,12 +256,17 @@ func (r requestFields) MarshalZerologObject(e *zerolog.Event) {
 		e.Str("id", r.ID)
 	}
 	e.Str("method", r.Method)
-	e.Str("url", r.URL)
+	e.Str("scheme", r.Scheme)
+	e.Str("host", r.Host)
+	e.Str("path", r.Path)
+	if r.Query != "" {
+		e.Str("query", r.Query)
+	}
 	if !r.Incoming.Empty() {
 		e.Object("incoming", r.Incoming)
 	}
-	if !r.Remote.Empty() {
-		e.Object("remote", r.Remote)
+	if r.Conn != nil {
+		e.Object("conn", *r.Conn)
 	}
 	if r.UserAgent != "" {
 		e.Str("user_agent", r.UserAgent)
@@ -263,9 +336,14 @@ type LoggingTransport struct {
 	// "source" object in the "request" object when non-empty (i.e. when
 	// --src-ip was used).
 	LocalIP string
-	// LogAddr controls whether the "incoming", "remote", and "source"
-	// address objects are logged.
+	// LogAddr controls whether the "incoming" and "source" address objects
+	// are logged.
 	LogAddr bool
+	// LogConn controls whether the "conn" object (the underlying network
+	// connection's remote address, reuse, and idle time) is logged. This
+	// requires an httptrace.ClientTrace on every request, so it's kept
+	// separate from LogAddr.
+	LogConn bool
 	// LogRequestHeaders controls whether the full (sanitized) request
 	// headers are logged in the "request" object.
 	LogRequestHeaders bool
@@ -275,14 +353,14 @@ type LoggingTransport struct {
 }
 
 func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	// Trace the underlying connection so we can log the upstream address
-	// (IP/port) this specific attempt actually connected to, regardless of
+	// Trace the underlying connection so we can log its details (remote
+	// address, reuse, idle time) for this specific attempt, regardless of
 	// whether a response (or only an error) comes back.
-	var conn net.Conn
-	if t.LogAddr {
+	var gotConn *httptrace.GotConnInfo
+	if t.LogConn {
 		req = req.WithContext(httptrace.WithClientTrace(req.Context(), &httptrace.ClientTrace{
 			GotConn: func(info httptrace.GotConnInfo) {
-				conn = info.Conn
+				gotConn = &info
 			},
 		}))
 	}
@@ -310,17 +388,29 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	reqFields := requestFields{
 		ID:        RequestIDFromContext(req.Context()),
 		Method:    req.Method,
-		URL:       req.URL.String(),
+		Scheme:    req.URL.Scheme,
+		Host:      req.URL.Host,
+		Path:      req.URL.Path,
+		Query:     sanitizeQuery(req.URL.RawQuery),
 		UserAgent: req.Header.Get("User-Agent"),
 		Auth:      AuthFieldsFromContext(req.Context()),
 	}
 	if t.LogAddr {
 		incomingIP, incomingPort := splitHostPort(req.RemoteAddr)
 		reqFields.Incoming = addrFields{IP: incomingIP, Port: incomingPort}
-		if conn != nil {
-			reqFields.Remote.IP, reqFields.Remote.Port = splitHostPort(conn.RemoteAddr().String())
-		}
 		reqFields.Source = addrFields{IP: t.LocalIP}
+	}
+	if t.LogConn && gotConn != nil {
+		connInfo := connFields{
+			ID:       ConnID(gotConn.Conn),
+			Reused:   gotConn.Reused,
+			WasIdle:  gotConn.WasIdle,
+			IdleTime: gotConn.IdleTime,
+		}
+		if gotConn.Conn != nil {
+			connInfo.Remote.IP, connInfo.Remote.Port = splitHostPort(gotConn.Conn.RemoteAddr().String())
+		}
+		reqFields.Conn = &connInfo
 	}
 	if t.LogRequestHeaders {
 		reqFields.Headers = sanitizeHeaders(req.Header)

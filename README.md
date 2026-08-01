@@ -152,9 +152,10 @@ The proxy supports multiple authentication methods that can be used simultaneous
 | `--retry-wait-max` | Maximum backoff delay between retries | `30s` |
 | `--rate-retry` | Retry 429 responses until `Retry-After` clears, instead of counting them against `--retries` | `true` |
 | `--log-level` | Minimum log level to output (`trace`, `debug`, `info`, `warn`, `error`) | `info` |
-| `--log-format` | Log output format, `console` for human-readable or `json` for structured | `console` |
+| `--log-format` | Log output format: `console` for human-readable, `json` for structured, or `auto` to use `console` when stderr is a terminal and `json` otherwise | `auto` |
 | `--log-rate-limit` | Log requests to the `/rate_limit` API, normally suppressed since they're issued periodically to poll rate limit status rather than in response to real traffic | `false` |
-| `--log-addr` | Log the `incoming`/`remote`/`source` IP and port for each request | `false` |
+| `--log-addr` | Log the `incoming`/`source` IP and port for each request | `false` |
+| `--log-conn` | Log details about the underlying network connection used for each request (remote address, whether it was reused, and idle time) | `false` |
 | `--log-request-headers` | Log the full request headers for each request (`Authorization`/`Cookie`/`Set-Cookie` values are always redacted) | `false` |
 | `--log-response-headers` | Log the full response headers for each request (`Authorization`/`Cookie`/`Set-Cookie` values are always redacted) | `false` |
 
@@ -172,7 +173,7 @@ The proxy exposes Prometheus metrics at `/metrics`:
 
 ## Logging
 
-Each proxied request is logged as a single structured line (`--log-format json`) or a human-readable line (`--log-format console`, the default), with request- and response-specific fields grouped into nested `request` and `response` objects:
+Each proxied request is logged as a single structured line (`--log-format json`) or a human-readable line (`--log-format console`); by default (`--log-format auto`) whichever is appropriate is chosen automatically based on whether stderr is a terminal. Request- and response-specific fields are grouped into nested `request` and `response` objects:
 
 ```json
 {
@@ -181,14 +182,22 @@ Each proxied request is logged as a single structured line (`--log-format json`)
   "request": {
     "id": "d9mhc9u9b7rie1ec7kng",
     "method": "GET",
-    "url": "https://api.github.com/some/path",
+    "scheme": "https",
+    "host": "api.github.com",
+    "path": "/some/path",
     "incoming": {
       "ip": "127.0.0.1",
       "port": "57074"
     },
-    "remote": {
-      "ip": "140.82.121.6",
-      "port": "443"
+    "conn": {
+      "id": "d9mmc2u9b7rkvbuev3i0",
+      "remote": {
+        "ip": "140.82.121.6",
+        "port": "443"
+      },
+      "reused": true,
+      "was_idle": true,
+      "idle_time": 13.270875
     },
     "user_agent": "curl/8.7.1",
     "source": {
@@ -221,7 +230,9 @@ Each proxied request is logged as a single structured line (`--log-format json`)
 ```
 
 - `request.id` uniquely identifies the incoming request (a [xid](https://github.com/rs/xid)); every attempt of the same request retried by `--retries`/`--rate-retry` shares the same `id`, so they can be correlated across log lines.
-- `request.incoming`/`request.remote`/`request.source` are only present when `--log-addr` is set. `incoming` is the address of the client that connected to the proxy; `remote` is the address of the upstream GitHub server this specific attempt actually connected to (captured off the underlying connection, so retried attempts can show a different address, e.g. after DNS re-resolution); `source` is only populated when `--src-ip` was also used, naming the specific source IP that request was dialed from.
+- `request.incoming`/`request.source` are only present when `--log-addr` is set. `incoming` is the address of the client that connected to the proxy; `source` is only populated when `--src-ip` was also used, naming the specific source IP that request was dialed from.
+- `request.conn` is only present when `--log-conn` is set, describing the underlying network connection used for this specific attempt (via `httptrace`, so retried attempts can show a different connection). `conn.id` is a unique identifier assigned when the connection is dialed and stays the same across every request that reuses it, so they can be correlated in logs. `conn.remote` is the address of the upstream GitHub server actually connected to (e.g. after DNS re-resolution); `conn.reused` reports whether an existing pooled connection was reused instead of dialing a new one; `conn.idle_time` (only present when `conn.was_idle` is `true`) is how long that reused connection had been sitting idle beforehand.
+- `request.query` is only present when the request has a query string; `access_token`/`client_secret` values are always redacted, matching GitHub's (legacy, but still accepted) query-string authentication forms.
 - `request.headers`/`response.headers` are only present when `--log-request-headers`/`--log-response-headers` are set, respectively. `Authorization`, `Cookie`, and `Set-Cookie` values are always redacted, since `request.auth` already surfaces the credential non-reversibly.
 - `request.auth.client_id`/`request.auth.installation_id` are only present for the credential type they apply to (e.g. GitHub Apps set both; OAuth clients set only `client_id`; personal access tokens set neither).
 - `request.auth.hashed_token` matches the `hashed_token` field GitHub itself emits in audit log events, computed from the request's `Authorization` header.
