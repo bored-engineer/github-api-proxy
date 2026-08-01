@@ -152,8 +152,11 @@ Caching is disabled by default; pass one of the flags below to enable it.
 | `--cache-redis-db` | Redis database number | `0` |
 | `--log-level` | Minimum log level to output (`trace`, `debug`, `info`, `warn`, `error`) | `info` |
 | `--log-rate-limit` | Log requests to the `/rate_limit` API, normally suppressed since they're issued periodically to poll rate limit status rather than in response to real traffic | `false` |
-| `--log-local-addr` | Log each connection's local address: the listener's address on `request.local_addr`, and the address dialed out from (e.g. matching a configured `--src-ip`) on `response.local_addr` | `true` |
-| `--log-remote-addr` | Log each connection's remote address plus id: the client's address on `request.remote_addr`, and the upstream GitHub server's address on `response.remote_addr` (also enables response reuse/idle-time stats) | `true` |
+| `--log-request-local-addr` | Log the listener's own address (the one the client connected to) as `request.local_addr` | `true` |
+| `--log-request-remote-addr` | Log the client's address, plus the incoming connection's id, as `request.remote_addr` | `true` |
+| `--log-response-local-addr` | Log the address the proxy dialed out from (e.g. matching a configured `--src-ip`) as `response.local_addr` | `true` |
+| `--log-response-remote-addr` | Log the upstream GitHub server's address, plus the connection's id, as `response.remote_addr` | `true` |
+| `--log-conn-reuse` | Log whether the upstream connection used for each request was freshly dialed or reused from the pool (`response.reused`, `response.was_idle`, `response.idle_time`) | `true` |
 | `--log-request-headers` | Log the full request headers for each request (the `Authorization` value, if any, is always replaced with its hash) | `false` |
 | `--log-response-headers` | Log the full response headers for each request (the `Authorization` value, if any, is always replaced with its hash) | `false` |
 | `--pprof` | Expose `net/http/pprof` debug endpoints under `/pprof/` (WARNING: allows dumping goroutines, heap, and CPU profiles; do not enable on a publicly reachable listener) | `false` |
@@ -235,8 +238,11 @@ Each proxied request is logged as a single structured JSON line. Request- and re
 ```
 
 - `request.id` uniquely identifies the incoming request (a [xid](https://github.com/rs/xid)).
-- `request.local_addr`/`response.local_addr` are only present when `--log-local-addr` is set. `request.local_addr` is the listener's own address the client connected to; `response.local_addr` is the address the proxy dialed out from (e.g. matching a configured `--src-ip`).
-- `request.remote_addr`/`response.remote_addr` are only present when `--log-remote-addr` is set, describing the connection to the client/upstream GitHub server, respectively (the latter via `httptrace`). `request.remote_addr` is the client's address; `response.remote_addr` is the address of the upstream GitHub server actually connected to (e.g. after DNS re-resolution). Each carries an `id`, a unique identifier assigned when the connection is accepted/dialed and stays the same across every request that reuses it, so they can be correlated in logs. `--log-remote-addr` also enables `response.reused`, which reports whether an existing pooled connection was reused instead of dialing a new one, and `response.idle_time` (only present when `response.was_idle` is `true`), how long that reused connection had been sitting idle beforehand.
+- `request.local_addr` (only present when `--log-request-local-addr` is set) is the listener's own address the client connected to.
+- `request.remote_addr` (only present when `--log-request-remote-addr` is set) is the client's address; its `id` is a unique identifier assigned when the connection is accepted and stays the same across every request that reuses it, so they can be correlated in logs.
+- `response.local_addr` (only present when `--log-response-local-addr` is set) is the address the proxy dialed out from (e.g. matching a configured `--src-ip`), determined via `httptrace`.
+- `response.remote_addr` (only present when `--log-response-remote-addr` is set) is the address of the upstream GitHub server actually connected to (e.g. after DNS re-resolution), also via `httptrace`; its `id` is a unique identifier assigned when the connection is dialed and stays the same across every request that reuses it.
+- `response.reused`/`response.was_idle`/`response.idle_time` are only present when `--log-conn-reuse` is set. `reused` reports whether an existing pooled connection was reused instead of dialing a new one; `idle_time` (only present when `was_idle` is `true`) is how long that reused connection had been sitting idle beforehand.
 - `request.query` is only present when the request has a query string, logged verbatim.
 - `request.headers`/`response.headers` are only present when `--log-request-headers`/`--log-response-headers` are set, respectively. The `Authorization` value (if any) is always replaced with its hash (the same value as `request.auth.hashed_token`) rather than logged raw.
 - `request.auth.client_id`/`request.auth.installation_id` are only present for the credential type they apply to (e.g. GitHub Apps set both; OAuth clients set only `client_id`; personal access tokens set neither).

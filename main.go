@@ -123,8 +123,11 @@ func main() {
 	srcIPs := pflag.StringSlice("src-ip", nil, "Source IP addresses to balance outgoing requests across (round-robin)")
 	logLevel := pflag.String("log-level", "info", "minimum log level to output (trace, debug, info, warn, error)")
 	logRateLimit := pflag.Bool("log-rate-limit", false, "log requests to the /rate_limit API, normally suppressed since they're issued periodically to poll rate limit status rather than in response to real traffic")
-	logLocalAddr := pflag.Bool("log-local-addr", true, "log each connection's local address: the listener's address on request.local_addr, and the address dialed out from (e.g. matching a configured --src-ip) on response.local_addr")
-	logRemoteAddr := pflag.Bool("log-remote-addr", true, "log each connection's remote address plus id: the client's address on request.remote_addr, and the upstream GitHub server's address on response.remote_addr (also enables response reuse/idle-time stats)")
+	logRequestLocalAddr := pflag.Bool("log-request-local-addr", true, "log the listener's own address (the one the client connected to) as request.local_addr")
+	logRequestRemoteAddr := pflag.Bool("log-request-remote-addr", true, "log the client's address, plus the incoming connection's id, as request.remote_addr")
+	logResponseLocalAddr := pflag.Bool("log-response-local-addr", true, "log the address the proxy dialed out from (e.g. matching a configured --src-ip) as response.local_addr")
+	logResponseRemoteAddr := pflag.Bool("log-response-remote-addr", true, "log the upstream GitHub server's address, plus the connection's id, as response.remote_addr")
+	logConnReuse := pflag.Bool("log-conn-reuse", true, "log whether the upstream connection used for each request was freshly dialed or reused from the pool (response.reused, response.was_idle, response.idle_time)")
 	logRequestHeaders := pflag.Bool("log-request-headers", false, "log the full request headers for each request (the Authorization value, if any, is always replaced with its hash)")
 	logResponseHeaders := pflag.Bool("log-response-headers", false, "log the full response headers for each request (the Authorization value, if any, is always replaced with its hash)")
 	pprofEnabled := pflag.Bool("pprof", false, "expose net/http/pprof debug endpoints under /pprof/ (WARNING: allows dumping goroutines, heap, and CPU profiles; do not enable on a publicly reachable listener)")
@@ -217,12 +220,15 @@ func main() {
 	for idx, dial := range srcIPDials {
 		base := &LatencyTransport{Base: dial}
 		chains[idx] = &LoggingTransport{
-			Base:               ghtransport.NewTransport(storage, base),
-			LogRateLimit:       *logRateLimit,
-			LogLocalAddr:       *logLocalAddr,
-			LogRemoteAddr:      *logRemoteAddr,
-			LogRequestHeaders:  *logRequestHeaders,
-			LogResponseHeaders: *logResponseHeaders,
+			Base:                  ghtransport.NewTransport(storage, base),
+			LogRateLimit:          *logRateLimit,
+			LogRequestLocalAddr:   *logRequestLocalAddr,
+			LogRequestRemoteAddr:  *logRequestRemoteAddr,
+			LogResponseLocalAddr:  *logResponseLocalAddr,
+			LogResponseRemoteAddr: *logResponseRemoteAddr,
+			LogConnReuse:          *logConnReuse,
+			LogRequestHeaders:     *logRequestHeaders,
+			LogResponseHeaders:    *logResponseHeaders,
 		}
 	}
 

@@ -143,18 +143,25 @@ type LoggingTransport struct {
 	// they are typically noisy since they're issued on a fixed interval
 	// to poll rate limit status rather than in response to real traffic.
 	LogRateLimit bool
-	// LogLocalAddr controls whether each connection's local address is
-	// logged: the listener's address as request.local_addr, and the
-	// address dialed out from (e.g. matching a configured --src-ip) as
+	// LogRequestLocalAddr controls whether the listener's own address
+	// (the one the client connected to) is logged as request.local_addr.
+	LogRequestLocalAddr bool
+	// LogRequestRemoteAddr controls whether the client's address (plus
+	// the incoming connection's id) is logged as request.remote_addr.
+	LogRequestRemoteAddr bool
+	// LogResponseLocalAddr controls whether the address the proxy dialed
+	// out from (e.g. matching a configured --src-ip) is logged as
 	// response.local_addr.
-	LogLocalAddr bool
-	// LogRemoteAddr controls whether each connection's remote address
-	// (plus its id) is logged: the client's address as
-	// request.remote_addr, and the upstream GitHub server's address as
-	// response.remote_addr. It also controls whether the response's
-	// connection reuse/idle-time stats are logged, since those describe
-	// that same connection.
-	LogRemoteAddr bool
+	LogResponseLocalAddr bool
+	// LogResponseRemoteAddr controls whether the upstream GitHub
+	// server's address (plus the connection's id) is logged as
+	// response.remote_addr.
+	LogResponseRemoteAddr bool
+	// LogConnReuse controls whether the response's connection reuse
+	// stats (reused, was_idle, idle_time) are logged, describing whether
+	// the upstream connection used for this request was freshly dialed
+	// or reused from the pool.
+	LogConnReuse bool
 	// LogRequestHeaders controls whether the full (sanitized) request
 	// headers are logged in the "request" object.
 	LogRequestHeaders bool
@@ -169,7 +176,7 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	// attempt, regardless of whether a response (or only an error) comes
 	// back.
 	var gotConn *httptrace.GotConnInfo
-	if t.LogLocalAddr || t.LogRemoteAddr {
+	if t.LogResponseLocalAddr || t.LogResponseRemoteAddr || t.LogConnReuse {
 		req = req.WithContext(httptrace.WithClientTrace(req.Context(), &httptrace.ClientTrace{
 			GotConn: func(info httptrace.GotConnInfo) {
 				gotConn = &info
@@ -208,12 +215,12 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	if req.URL.RawQuery != "" {
 		reqDict.Str("query", req.URL.RawQuery)
 	}
-	if t.LogLocalAddr {
+	if t.LogRequestLocalAddr {
 		if local := logAddrDict(splitHostPort(FromContext[string](req.Context(), ctxConnLocalAddr{}))); local != nil {
 			reqDict.Dict("local_addr", local)
 		}
 	}
-	if t.LogRemoteAddr {
+	if t.LogRequestRemoteAddr {
 		if remote := logAddrDict(splitHostPort(req.RemoteAddr)); remote != nil {
 			if id := FromContext[xid.ID](req.Context(), ctxConnXID{}); !id.IsNil() {
 				remote.Str("id", id.String())
@@ -235,18 +242,20 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		respDict := zerolog.Dict()
 		respDict.Int("status", resp.StatusCode)
 		if gotConn != nil && gotConn.Conn != nil {
-			if t.LogLocalAddr {
+			if t.LogResponseLocalAddr {
 				if local := logAddrDict(splitHostPort(gotConn.Conn.LocalAddr().String())); local != nil {
 					respDict.Dict("local_addr", local)
 				}
 			}
-			if t.LogRemoteAddr {
+			if t.LogResponseRemoteAddr {
 				if remote := logAddrDict(splitHostPort(gotConn.Conn.RemoteAddr().String())); remote != nil {
 					if conn, ok := gotConn.Conn.(*xidConn); ok {
 						remote.Str("id", conn.id.String())
 					}
 					respDict.Dict("remote_addr", remote)
 				}
+			}
+			if t.LogConnReuse {
 				respDict.Bool("reused", gotConn.Reused)
 				respDict.Bool("was_idle", gotConn.WasIdle)
 				if gotConn.WasIdle {
