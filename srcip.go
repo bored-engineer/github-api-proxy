@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -26,6 +27,17 @@ func RoundRobin(transports []http.RoundTripper) http.RoundTripper {
 		return transports[0]
 	}
 	return &RoundRobinTransport{Transports: transports}
+}
+
+// srcIPContextKey is the context.Context key under which the source IP is
+// stored (via ContextTransport).
+type srcIPContextKey struct{}
+
+// SrcIPFromContext returns the source IP previously stored in ctx (via
+// ContextTransport), or "" if none was stored (i.e. --src-ip wasn't used).
+func SrcIPFromContext(ctx context.Context) string {
+	ip, _ := ctx.Value(srcIPContextKey{}).(string)
+	return ip
 }
 
 // SrcIPTransports parses addrs and returns one dedicated http.Transport
