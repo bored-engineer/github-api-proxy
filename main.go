@@ -123,7 +123,11 @@ func main() {
 	srcIPs := pflag.StringSlice("src-ip", nil, "Source IP addresses to balance outgoing requests across (round-robin)")
 	logLevel := pflag.String("log-level", "info", "minimum log level to output (trace, debug, info, warn, error)")
 	logRateLimit := pflag.Bool("log-rate-limit", false, "log requests to the /rate_limit API, normally suppressed since they're issued periodically to poll rate limit status rather than in response to real traffic")
-	logConn := pflag.Bool("log-conn", false, "log details about the underlying network connection used for each request (incoming/source address, id, whether it was reused, and idle time)")
+	logRequestLocalAddr := pflag.Bool("log-request-local-addr", true, "log the listener's own address (the one the client connected to) as request.conn.local")
+	logRequestRemoteAddr := pflag.Bool("log-request-remote-addr", true, "log the client's address, plus the incoming connection's id, as request.conn.remote")
+	logResponseLocalAddr := pflag.Bool("log-response-local-addr", true, "log the address the proxy dialed out from (e.g. matching a configured --src-ip) as response.conn.local")
+	logResponseRemoteAddr := pflag.Bool("log-response-remote-addr", true, "log the upstream GitHub server's address, plus the connection's id, as response.conn.remote")
+	logResponseConnReuse := pflag.Bool("log-response-conn-reuse", true, "log whether the upstream connection used for each request was freshly dialed or reused from the pool (response.conn.remote.reused, response.conn.remote.was_idle, response.conn.remote.idle_time)")
 	logRequestHeaders := pflag.Bool("log-request-headers", false, "log the full request headers for each request (the Authorization value, if any, is always replaced with its hash)")
 	logResponseHeaders := pflag.Bool("log-response-headers", false, "log the full response headers for each request (the Authorization value, if any, is always replaced with its hash)")
 	pprofEnabled := pflag.Bool("pprof", false, "expose net/http/pprof debug endpoints under /pprof/ (WARNING: allows dumping goroutines, heap, and CPU profiles; do not enable on a publicly reachable listener)")
@@ -216,11 +220,15 @@ func main() {
 	for idx, dial := range srcIPDials {
 		base := &LatencyTransport{Base: dial}
 		chains[idx] = &LoggingTransport{
-			Base:               ghtransport.NewTransport(storage, base),
-			LogRateLimit:       *logRateLimit,
-			LogConn:            *logConn,
-			LogRequestHeaders:  *logRequestHeaders,
-			LogResponseHeaders: *logResponseHeaders,
+			Base:                  ghtransport.NewTransport(storage, base),
+			LogRateLimit:          *logRateLimit,
+			LogRequestLocalAddr:   *logRequestLocalAddr,
+			LogRequestRemoteAddr:  *logRequestRemoteAddr,
+			LogResponseLocalAddr:  *logResponseLocalAddr,
+			LogResponseRemoteAddr: *logResponseRemoteAddr,
+			LogResponseConnReuse:  *logResponseConnReuse,
+			LogRequestHeaders:     *logRequestHeaders,
+			LogResponseHeaders:    *logResponseHeaders,
 		}
 	}
 
@@ -384,7 +392,9 @@ func main() {
 			mux.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxXID{}, xid.New())))
 		}),
 		ConnContext: func(ctx context.Context, c net.Conn) context.Context {
-			return context.WithValue(ctx, ctxConnXID{}, xid.New())
+			ctx = context.WithValue(ctx, ctxConnXID{}, xid.New())
+			ctx = context.WithValue(ctx, ctxConnLocalAddr{}, c.LocalAddr().String())
+			return ctx
 		},
 	}
 	for _, listener := range listeners {

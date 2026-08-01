@@ -61,15 +61,7 @@ func SrcIPTransports(addrs []string, base http.RoundTripper) ([]http.RoundTrippe
 			}
 			return conn, err
 		}
-		if ip != nil {
-			transports[idx] = &ContextTransport{
-				Base:  transport,
-				Key:   ctxSourceIP{},
-				Value: ip.String(),
-			}
-		} else {
-			transports[idx] = transport
-		}
+		transports[idx] = transport
 	}
 	return transports, nil
 }
