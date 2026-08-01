@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"net/http/pprof"
 	"net/url"
 	"os"
 	"os/signal"
@@ -129,6 +130,7 @@ func main() {
 	logConn := pflag.Bool("log-conn", false, "log details about the underlying network connection used for each request (incoming/source address, id, whether it was reused, and idle time)")
 	logRequestHeaders := pflag.Bool("log-request-headers", false, "log the full request headers for each request (the Authorization value, if any, is always replaced with its hash)")
 	logResponseHeaders := pflag.Bool("log-response-headers", false, "log the full response headers for each request (the Authorization value, if any, is always replaced with its hash)")
+	pprofEnabled := pflag.Bool("pprof", false, "expose net/http/pprof debug endpoints under /pprof/ (WARNING: allows dumping goroutines, heap, and CPU profiles; do not enable on a publicly reachable listener)")
 	pflag.Parse()
 
 	level, err := zerolog.ParseLevel(*logLevel)
@@ -359,6 +361,23 @@ func main() {
 	mux.Handle("/", proxy)
 	mux.Handle("/metrics", promhttp.Handler())
 	mux.Handle("/api/v3/", http.StripPrefix("/api/v3/", proxy))
+	if *pprofEnabled {
+		// net/http/pprof's own Index only recognizes named profiles
+		// (e.g. "heap") under a literal "/debug/pprof/" prefix, so route
+		// named lookups through pprof.Handler directly rather than relying
+		// on Index's internal routing, which would never match under "/pprof/".
+		mux.HandleFunc("/pprof/", func(w http.ResponseWriter, r *http.Request) {
+			if name := strings.TrimPrefix(r.URL.Path, "/pprof/"); name != "" {
+				pprof.Handler(name).ServeHTTP(w, r)
+				return
+			}
+			pprof.Index(w, r)
+		})
+		mux.HandleFunc("/pprof/cmdline", pprof.Cmdline)
+		mux.HandleFunc("/pprof/profile", pprof.Profile)
+		mux.HandleFunc("/pprof/symbol", pprof.Symbol)
+		mux.HandleFunc("/pprof/trace", pprof.Trace)
+	}
 
 	// Bind every requested listener up front so any invalid address is
 	// reported immediately rather than after backgrounding the server.
