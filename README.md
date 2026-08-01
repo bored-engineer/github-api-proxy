@@ -186,12 +186,12 @@ Each proxied request is logged as a single structured JSON line. Request- and re
     "path": "/some/path",
     "query": "page=2",
     "conn": {
-      "id": "d9mn10u9b7rlmqkucu7g",
       "local_addr": {
         "ip": "10.0.0.5",
         "port": "8080"
       },
       "remote_addr": {
+        "id": "d9mn10u9b7rlmqkucu7g",
         "ip": "127.0.0.1",
         "port": "60600"
       }
@@ -211,6 +211,7 @@ Each proxied request is logged as a single structured JSON line. Request- and re
         "port": "51422"
       },
       "remote_addr": {
+        "id": "d9mn12ncb7rlmqkucu9g",
         "ip": "140.82.121.6",
         "port": "443"
       },
@@ -237,8 +238,8 @@ Each proxied request is logged as a single structured JSON line. Request- and re
 ```
 
 - `request.id` uniquely identifies the incoming request (a [xid](https://github.com/rs/xid)).
-- `request.conn` is only present when `--log-conn` is set, describing the incoming connection from the client to the proxy: `conn.id` is a unique identifier assigned when the connection is accepted and stays the same across every request that reuses it, so they can be correlated in logs; `conn.local_addr` is the listener's own address the client connected to; `conn.remote_addr` is the client's address.
-- `response.conn` is only present when `--log-conn` is set, describing the underlying network connection used to reach the upstream GitHub server (via `httptrace`). `conn.local_addr` is the address the proxy dialed out from (e.g. matching a configured `--src-ip`); `conn.remote_addr` is the address of the upstream GitHub server actually connected to (e.g. after DNS re-resolution); `conn.reused` reports whether an existing pooled connection was reused instead of dialing a new one; `conn.idle_time` (only present when `conn.was_idle` is `true`) is how long that reused connection had been sitting idle beforehand.
+- `request.conn` is only present when `--log-conn` is set, describing the incoming connection from the client to the proxy: `conn.local_addr` is the listener's own address the client connected to; `conn.remote_addr` is the client's address, and its `id` is a unique identifier assigned when the connection is accepted and stays the same across every request that reuses it, so they can be correlated in logs.
+- `response.conn` is only present when `--log-conn` is set, describing the underlying network connection used to reach the upstream GitHub server (via `httptrace`). `conn.local_addr` is the address the proxy dialed out from (e.g. matching a configured `--src-ip`); `conn.remote_addr` is the address of the upstream GitHub server actually connected to (e.g. after DNS re-resolution), and its `id` is a unique identifier assigned when the connection is dialed and stays the same across every request that reuses it; `conn.reused` reports whether an existing pooled connection was reused instead of dialing a new one; `conn.idle_time` (only present when `conn.was_idle` is `true`) is how long that reused connection had been sitting idle beforehand.
 - `request.query` is only present when the request has a query string, logged verbatim.
 - `request.headers`/`response.headers` are only present when `--log-request-headers`/`--log-response-headers` are set, respectively. The `Authorization` value (if any) is always replaced with its hash (the same value as `request.auth.hashed_token`) rather than logged raw.
 - `request.auth.client_id`/`request.auth.installation_id` are only present for the credential type they apply to (e.g. GitHub Apps set both; OAuth clients set only `client_id`; personal access tokens set neither).

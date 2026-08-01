@@ -65,21 +65,22 @@ func logAddrDict(ip, port string) *zerolog.Event {
 // httptrace.GotConnInfo, describing the underlying network connection used
 // for this specific attempt: local_addr is the source IP/port the proxy
 // dialed out from (e.g. matching a configured --src-ip), and remote_addr is
-// the upstream address it connected to. Returns nil if info is nil (e.g. an
-// error occurred before a connection was ever obtained).
+// the upstream address it connected to, plus (if known) the connection's
+// unique id. Returns nil if info is nil (e.g. an error occurred before a
+// connection was ever obtained).
 func logConnDict(info *httptrace.GotConnInfo) *zerolog.Event {
 	if info == nil {
 		return nil
 	}
 	d := zerolog.Dict()
-	if conn, ok := info.Conn.(*xidConn); ok {
-		d.Str("id", conn.id.String())
-	}
 	if info.Conn != nil {
 		if local := logAddrDict(splitHostPort(info.Conn.LocalAddr().String())); local != nil {
 			d.Dict("local_addr", local)
 		}
 		if remote := logAddrDict(splitHostPort(info.Conn.RemoteAddr().String())); remote != nil {
+			if conn, ok := info.Conn.(*xidConn); ok {
+				remote.Str("id", conn.id.String())
+			}
 			d.Dict("remote_addr", remote)
 		}
 	}
@@ -175,9 +176,10 @@ type LoggingTransport struct {
 	// to poll rate limit status rather than in response to real traffic.
 	LogRateLimit bool
 	// LogConn controls whether the "conn" object is logged on the request
-	// (incoming connection ID, the client's remote_addr, and the
-	// listener's local_addr) and on the response (the upstream
-	// connection's ID, local_addr/remote_addr, reuse, and idle time).
+	// (the listener's local_addr and the client's remote_addr, which
+	// carries the incoming connection's id) and on the response
+	// (local_addr/remote_addr, where remote_addr carries the upstream
+	// connection's id, plus reuse and idle time).
 	LogConn bool
 	// LogRequestHeaders controls whether the full (sanitized) request
 	// headers are logged in the "request" object.
@@ -233,13 +235,13 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	}
 	if t.LogConn {
 		conn := zerolog.Dict()
-		if id := FromContext[xid.ID](req.Context(), ctxConnXID{}); !id.IsNil() {
-			conn.Str("id", id.String())
-		}
 		if local := logAddrDict(splitHostPort(FromContext[string](req.Context(), ctxConnLocalAddr{}))); local != nil {
 			conn.Dict("local_addr", local)
 		}
 		if remote := logAddrDict(splitHostPort(req.RemoteAddr)); remote != nil {
+			if id := FromContext[xid.ID](req.Context(), ctxConnXID{}); !id.IsNil() {
+				remote.Str("id", id.String())
+			}
 			conn.Dict("remote_addr", remote)
 		}
 		reqDict.Dict("conn", conn)
