@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"math/rand"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -237,9 +238,15 @@ func main() {
 
 	// newBaseTransport returns a transport for a single authenticated
 	// token, balanced round-robin per request across each source IP's
-	// chain (or a single chain if no --src-ip was given).
+	// chain (or a single chain if no --src-ip was given). The chain order
+	// is shuffled per credential so that multiple credentials don't all
+	// send their first request through the same source IP.
 	newBaseTransport := func() http.RoundTripper {
-		return RoundRobin(chains)
+		shuffled := slices.Clone(chains)
+		rand.Shuffle(len(shuffled), func(i, j int) {
+			shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+		})
+		return RoundRobin(shuffled)
 	}
 
 	// If credentials were provided, balancing requests across them.
