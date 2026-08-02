@@ -130,8 +130,16 @@ func main() {
 	logResponseConnReuse := pflag.Bool("log-response-conn-reuse", true, "log whether the upstream connection used for each request was freshly dialed or reused from the pool (response.conn.remote.reused, response.conn.remote.was_idle, response.conn.remote.idle_time)")
 	logRequestHeaders := pflag.Bool("log-request-headers", false, "log the full request headers for each request (the Authorization value, if any, is always replaced with its hash)")
 	logResponseHeaders := pflag.Bool("log-response-headers", false, "log the full response headers for each request (the Authorization value, if any, is always replaced with its hash)")
-	pprofEnabled := pflag.Bool("pprof", false, "expose net/http/pprof debug endpoints under /pprof/ (WARNING: allows dumping goroutines, heap, and CPU profiles; do not enable on a publicly reachable listener)")
+	internalPrefix := pflag.String("internal-prefix", "/github-api-proxy/", "URL path prefix under which internal endpoints (pprof, metrics, rate_limits) are served")
+	pprofEnabled := pflag.Bool("pprof", false, "expose net/http/pprof debug endpoints under <internal-prefix>pprof/ (WARNING: allows dumping goroutines, heap, and CPU profiles; do not enable on a publicly reachable listener)")
+	metricsEnabled := pflag.Bool("metrics", true, "expose Prometheus metrics under <internal-prefix>metrics")
+	rateLimitsEnabled := pflag.Bool("rate-limits", false, "expose <internal-prefix>rate_limits, which live-polls /rate_limit for every configured transport in parallel and returns the aggregated results as JSON")
 	pflag.Parse()
+
+	prefix := *internalPrefix
+	if !strings.HasSuffix(prefix, "/") {
+		prefix += "/"
+	}
 
 	level, err := zerolog.ParseLevel(*logLevel)
 	if err != nil {
@@ -143,6 +151,7 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("url.Parse failed")
 	}
+	rateLimitURL := proxyURL.ResolveReference(&url.URL{Path: "/rate_limit"})
 
 	// Build one dedicated transport per source IP (or just the default
 	// transport if none were provided) to balance outgoing connections.
@@ -243,6 +252,7 @@ func main() {
 	}
 
 	// If credentials were provided, balancing requests across them.
+	var rateLimitSources []RateLimitSource
 	if len(*authOAuth) > 0 || len(*authApp) > 0 || len(*authToken) > 0 {
 		var balancing ghratelimit.BalancingTransport
 		// If using OAuth credentials, just use basic auth.
@@ -259,14 +269,16 @@ func main() {
 			if err != nil {
 				log.Fatal().Err(err).Str("client_id", clientID).Msg("ghauth.Basic failed")
 			}
-			balancing = append(balancing, &ghratelimit.Transport{
+			t := &ghratelimit.Transport{
 				Base: authTransport,
 				Limits: ghratelimit.Limits{
 					Notify: reportRateLimit(clientID, "", "", *rateResources),
 				},
 				Reserve: *rateReserve,
 				Spoof:   *rateSpoof,
-			})
+			}
+			balancing = append(balancing, t)
+			rateLimitSources = append(rateLimitSources, RateLimitSource{ClientID: clientID, Transport: t})
 		}
 		// If using GitHub App credentials, use the GitHub App transport.
 		for _, appParams := range *authApp {
@@ -282,7 +294,7 @@ func main() {
 			if err != nil {
 				log.Fatal().Err(err).Str("client_id", clientID).Msg("ghauth.App failed")
 			}
-			balancing = append(balancing, &ghratelimit.Transport{
+			t := &ghratelimit.Transport{
 				Base: &oauth2.Transport{
 					Base: &ContextTransport{
 						Base: &ContextTransport{
@@ -300,12 +312,14 @@ func main() {
 				},
 				Reserve: *rateReserve,
 				Spoof:   *rateSpoof,
-			})
+			}
+			balancing = append(balancing, t)
+			rateLimitSources = append(rateLimitSources, RateLimitSource{ClientID: clientID, InstallationID: installationID, Transport: t})
 		}
 		for _, token := range *authToken {
 			hashed := sha256.Sum256([]byte(token))
 			hashedToken := base64.StdEncoding.EncodeToString(hashed[:])
-			balancing = append(balancing, &ghratelimit.Transport{
+			t := &ghratelimit.Transport{
 				Base: &oauth2.Transport{
 					Base:   newBaseTransport(),
 					Source: oauth2.StaticTokenSource(ghauth.Token(token)),
@@ -315,12 +329,12 @@ func main() {
 				},
 				Reserve: *rateReserve,
 				Spoof:   *rateSpoof,
-			})
+			}
+			balancing = append(balancing, t)
+			rateLimitSources = append(rateLimitSources, RateLimitSource{HashedToken: hashedToken, Transport: t})
 		}
 		// Poll the rate limits for each transport.
-		go balancing.Poll(ctx, *rateInterval, proxyURL.ResolveReference(&url.URL{
-			Path: "/rate_limit",
-		}))
+		go balancing.Poll(ctx, *rateInterval, rateLimitURL)
 		transport = balancing
 	}
 
@@ -354,24 +368,30 @@ func main() {
 	// Setup the HTTP router.
 	mux := http.NewServeMux()
 	mux.Handle("/", proxy)
-	mux.Handle("/metrics", promhttp.Handler())
 	mux.Handle("/api/v3/", http.StripPrefix("/api/v3/", proxy))
+	if *metricsEnabled {
+		mux.Handle(prefix+"metrics", promhttp.Handler())
+	}
+	if *rateLimitsEnabled {
+		mux.Handle(prefix+"rate_limits", RateLimitsHandler(rateLimitSources, rateLimitURL))
+	}
 	if *pprofEnabled {
+		pprofPrefix := prefix + "pprof/"
 		// net/http/pprof's own Index only recognizes named profiles
 		// (e.g. "heap") under a literal "/debug/pprof/" prefix, so route
 		// named lookups through pprof.Handler directly rather than relying
-		// on Index's internal routing, which would never match under "/pprof/".
-		mux.HandleFunc("/pprof/", func(w http.ResponseWriter, r *http.Request) {
-			if name := strings.TrimPrefix(r.URL.Path, "/pprof/"); name != "" {
+		// on Index's internal routing, which would never match under pprofPrefix.
+		mux.HandleFunc(pprofPrefix, func(w http.ResponseWriter, r *http.Request) {
+			if name := strings.TrimPrefix(r.URL.Path, pprofPrefix); name != "" {
 				pprof.Handler(name).ServeHTTP(w, r)
 				return
 			}
 			pprof.Index(w, r)
 		})
-		mux.HandleFunc("/pprof/cmdline", pprof.Cmdline)
-		mux.HandleFunc("/pprof/profile", pprof.Profile)
-		mux.HandleFunc("/pprof/symbol", pprof.Symbol)
-		mux.HandleFunc("/pprof/trace", pprof.Trace)
+		mux.HandleFunc(pprofPrefix+"cmdline", pprof.Cmdline)
+		mux.HandleFunc(pprofPrefix+"profile", pprof.Profile)
+		mux.HandleFunc(pprofPrefix+"symbol", pprof.Symbol)
+		mux.HandleFunc(pprofPrefix+"trace", pprof.Trace)
 	}
 
 	// Bind every requested listener up front so any invalid address is
