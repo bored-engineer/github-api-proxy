@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path"
 	"slices"
 	"strings"
 	"time"
@@ -131,15 +132,12 @@ func main() {
 	logRequestHeaders := pflag.Bool("log-request-headers", false, "log the full request headers for each request (the Authorization value, if any, is always replaced with its hash)")
 	logResponseHeaders := pflag.Bool("log-response-headers", false, "log the full response headers for each request (the Authorization value, if any, is always replaced with its hash)")
 	internalPrefix := pflag.String("internal-prefix", "/github-api-proxy/", "URL path prefix under which internal endpoints (pprof, metrics, rate_limits) are served")
-	pprofEnabled := pflag.Bool("pprof", false, "expose net/http/pprof debug endpoints under <internal-prefix>pprof/ (WARNING: allows dumping goroutines, heap, and CPU profiles; do not enable on a publicly reachable listener)")
-	metricsEnabled := pflag.Bool("metrics", true, "expose Prometheus metrics under <internal-prefix>metrics")
-	rateLimitsEnabled := pflag.Bool("rate-limits", false, "expose <internal-prefix>rate_limits, which live-polls /rate_limit for every configured transport in parallel and returns the aggregated results as JSON")
+	pprofEnabled := pflag.Bool("pprof", false, "expose net/http/pprof debug endpoints under <internal-prefix>/pprof/ (WARNING: allows dumping goroutines, heap, and CPU profiles; do not enable on a publicly reachable listener)")
+	metricsEnabled := pflag.Bool("metrics", true, "expose Prometheus metrics under <internal-prefix>/metrics")
+	rateLimitsEnabled := pflag.Bool("rate-limits", false, "expose <internal-prefix>/rate_limits, which live-polls /rate_limit for every configured transport in parallel and returns the aggregated results as JSON")
 	pflag.Parse()
 
-	prefix := *internalPrefix
-	if !strings.HasSuffix(prefix, "/") {
-		prefix += "/"
-	}
+	prefix := path.Join("/", *internalPrefix)
 
 	level, err := zerolog.ParseLevel(*logLevel)
 	if err != nil {
@@ -370,13 +368,13 @@ func main() {
 	mux.Handle("/", proxy)
 	mux.Handle("/api/v3/", http.StripPrefix("/api/v3/", proxy))
 	if *metricsEnabled {
-		mux.Handle(prefix+"metrics", promhttp.Handler())
+		mux.Handle(path.Join(prefix, "metrics"), promhttp.Handler())
 	}
 	if *rateLimitsEnabled {
-		mux.Handle(prefix+"rate_limits", RateLimitsHandler(rateLimitSources, rateLimitURL))
+		mux.Handle(path.Join(prefix, "rate_limits"), RateLimitsHandler(rateLimitSources, rateLimitURL))
 	}
 	if *pprofEnabled {
-		pprofPrefix := prefix + "pprof/"
+		pprofPrefix := path.Join(prefix, "pprof") + "/"
 		// net/http/pprof's own Index only recognizes named profiles
 		// (e.g. "heap") under a literal "/debug/pprof/" prefix, so route
 		// named lookups through pprof.Handler directly rather than relying

@@ -160,23 +160,26 @@ Caching is disabled by default; pass one of the flags below to enable it.
 | `--log-request-headers` | Log the full request headers for each request (the `Authorization` value, if any, is always replaced with its hash) | `false` |
 | `--log-response-headers` | Log the full response headers for each request (the `Authorization` value, if any, is always replaced with its hash) | `false` |
 | `--internal-prefix` | URL path prefix under which internal endpoints (`pprof`, `metrics`, `rate_limits`) are served | `/github-api-proxy/` |
-| `--pprof` | Expose `net/http/pprof` debug endpoints under `<internal-prefix>pprof/` (WARNING: allows dumping goroutines, heap, and CPU profiles; do not enable on a publicly reachable listener) | `false` |
-| `--metrics` | Expose Prometheus metrics under `<internal-prefix>metrics` | `true` |
-| `--rate-limits` | Expose `<internal-prefix>rate_limits`, which live-polls `/rate_limit` for every configured transport in parallel and returns the aggregated results as JSON | `false` |
+| `--pprof` | Expose `net/http/pprof` debug endpoints under `<internal-prefix>/pprof/` (WARNING: allows dumping goroutines, heap, and CPU profiles; do not enable on a publicly reachable listener) | `false` |
+| `--metrics` | Expose Prometheus metrics under `<internal-prefix>/metrics` | `true` |
+| `--rate-limits` | Expose `<internal-prefix>/rate_limits`, which live-polls `/rate_limit` for every configured transport in parallel and returns the aggregated results as JSON | `false` |
 
 ## API Endpoints
 
 - `/` - Proxies all requests to the upstream GitHub REST API
-- `<internal-prefix>metrics` - Prometheus metrics endpoint, only registered when `--metrics` is set (default: enabled, at `/github-api-proxy/metrics`)
-- `<internal-prefix>pprof/` - `net/http/pprof` debug endpoints, only registered when `--pprof` is set
-- `<internal-prefix>rate_limits` - Live, parallel poll of `/rate_limit` across every configured authentication transport, only registered when `--rate-limits` is set. Returns a JSON array with one entry per transport (labeled by `client_id`/`installation_id`/`hashed_token`, matching the Prometheus labels below), each containing either its fetched `resources` or an `error`
+- `<internal-prefix>/metrics` - Prometheus metrics endpoint, only registered when `--metrics` is set (default: enabled, at `/github-api-proxy/metrics`)
+- `<internal-prefix>/pprof/` - `net/http/pprof` debug endpoints, only registered when `--pprof` is set
+- `<internal-prefix>/rate_limits` - Live, parallel poll of `/rate_limit` across every configured authentication transport, only registered when `--rate-limits` is set. Returns a JSON array with one entry per transport (labeled by `client_id`/`installation_id`/`hashed_token`, matching the Prometheus labels below), each containing either its fetched `resources` or an `error`
 
 ## Monitoring
 
-The proxy exposes Prometheus metrics at `<internal-prefix>metrics` (default: `/github-api-proxy/metrics`):
+The proxy exposes Prometheus metrics at `<internal-prefix>/metrics` (default: `/github-api-proxy/metrics`):
 
-- `github_rate_limit_remaining` - Number of requests remaining in current rate limit window
-- `github_rate_limit_reset` - Unix timestamp when rate limit window resets
+- `github_rate_limit_remaining` (gauge; labels: `client_id`, `installation_id`, `hashed_token`, `resource`) - Number of requests remaining in current rate limit window
+- `github_rate_limit_reset` (gauge; labels: `client_id`, `installation_id`, `hashed_token`, `resource`) - Unix timestamp when rate limit window resets
+- `github_latency_seconds` (summary with p50/p75/p90/p95/p99 quantiles; label: `status`) - Latency of each outgoing request to the upstream GitHub API, labeled by the HTTP status code returned for that specific network round trip
+
+For credentials authenticated via `--auth-token`, `client_id`/`installation_id` are empty and `hashed_token` holds a SHA-256 hash of the token (base64-encoded) instead, so the raw token is never exposed in metrics.
 
 ## Logging
 

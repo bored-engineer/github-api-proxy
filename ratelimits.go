@@ -38,9 +38,7 @@ func RateLimitsHandler(sources []RateLimitSource, u *url.URL) http.HandlerFunc {
 		results := make([]RateLimitResult, len(sources))
 		var wg sync.WaitGroup
 		for idx, source := range sources {
-			wg.Add(1)
-			go func(idx int, source RateLimitSource) {
-				defer wg.Done()
+			wg.Go(func() {
 				result := RateLimitResult{
 					ClientID:       source.ClientID,
 					InstallationID: source.InstallationID,
@@ -56,7 +54,7 @@ func RateLimitsHandler(sources []RateLimitSource, u *url.URL) http.HandlerFunc {
 					result.Resources = resources
 				}
 				results[idx] = result
-			}(idx, source)
+			})
 		}
 		wg.Wait()
 		w.Header().Set("Content-Type", "application/json")
