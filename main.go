@@ -117,7 +117,7 @@ func main() {
 	authOAuth := pflag.StringSlice("auth-oauth", nil, "OAuth clients for GitHub API authentication in the format 'client_id:client_secret'")
 	authApp := pflag.StringSlice("auth-app", nil, "GitHub App clients for GitHub API authentication in the format 'client_id:installation_id:private_key'")
 	authToken := pflag.StringSlice("auth-token", nil, "GitHub personal access tokens for GitHub API authentication")
-	rate := pflag.Int("rate", 0, "maximum requests per hour, shared globally across all authentication tokens")
+	rate := pflag.Int("rate", 0, "maximum requests per hour, applied independently to each configured authentication transport (or to the base transport, if no credentials are configured)")
 	rateInterval := pflag.Duration("rate-interval", 60*time.Second, "Interval for rate limit checks")
 	rateResources := pflag.StringSlice("rate-resources", []string{"core", "graphql"}, "Resource types to report rate limit metrics for (empty means report all)")
 	rateReserve := pflag.Bool("rate-reserve", true, "Proactively reserve rate limit capacity for in-flight requests before response headers are parsed")
@@ -256,10 +256,21 @@ func main() {
 		return RoundRobin(shuffled)
 	}
 
-	// If credentials were provided, balancing requests across them.
+	// rateLimited wraps rt with a rate limit of --rate requests per hour, if
+	// configured. Each transport passed through here gets its own independent
+	// budget, rather than a single budget being shared globally across every
+	// transport.
+	rateLimited := func(rt http.RoundTripper) http.RoundTripper {
+		if *rate > 0 {
+			return ratelimit.New(rt, *rate, ratelimit.Per(time.Hour))
+		}
+		return rt
+	}
+
+	// If credentials were provided, round-robin requests across them.
 	var rateLimitSources []RateLimitSource
 	if len(*authOAuth) > 0 || len(*authApp) > 0 || len(*authToken) > 0 {
-		var balancing ghratelimit.BalancingTransport
+		var transports []http.RoundTripper
 		// If using OAuth credentials, just use basic auth.
 		for _, params := range *authOAuth {
 			clientID, clientSecret, ok := strings.Cut(params, ":")
@@ -282,7 +293,7 @@ func main() {
 				Reserve: *rateReserve,
 				Spoof:   *rateSpoof,
 			}
-			balancing = append(balancing, t)
+			transports = append(transports, rateLimited(t))
 			rateLimitSources = append(rateLimitSources, RateLimitSource{ClientID: clientID, Transport: t})
 		}
 		// If using GitHub App credentials, use the GitHub App transport.
@@ -318,7 +329,7 @@ func main() {
 				Reserve: *rateReserve,
 				Spoof:   *rateSpoof,
 			}
-			balancing = append(balancing, t)
+			transports = append(transports, rateLimited(t))
 			rateLimitSources = append(rateLimitSources, RateLimitSource{ClientID: clientID, InstallationID: installationID, Transport: t})
 		}
 		for _, token := range *authToken {
@@ -335,19 +346,18 @@ func main() {
 				Reserve: *rateReserve,
 				Spoof:   *rateSpoof,
 			}
-			balancing = append(balancing, t)
+			transports = append(transports, rateLimited(t))
 			rateLimitSources = append(rateLimitSources, RateLimitSource{HashedToken: hashedToken, Transport: t})
 		}
 		// Poll the rate limits for each transport.
-		go balancing.Poll(ctx, *rateInterval, rateLimitURL)
-		transport = balancing
-	}
-
-	// If --rate is set, apply a single rate limit shared across all
-	// credentials/source IPs (rather than one budget per credential), so
-	// the configured throughput is a global cap on the proxy as a whole.
-	if *rate > 0 {
-		transport = ratelimit.New(transport, *rate, ratelimit.Per(time.Hour))
+		for _, source := range rateLimitSources {
+			go source.Transport.Poll(ctx, *rateInterval, rateLimitURL)
+		}
+		transport = RoundRobin(transports)
+	} else {
+		// No credentials configured; --rate (if any) applies to the sole
+		// base transport instead.
+		transport = rateLimited(transport)
 	}
 
 	// Setup the reverse proxy.
