@@ -4,8 +4,8 @@ A high-performance reverse proxy for the GitHub REST API that provides authentic
 
 ## Features
 
-- **Authentication Balancing**: Distribute requests across multiple GitHub tokens/apps
-- **Rate Limiting**: Built-in rate limiting with configurable requests per hour
+- **Authentication Balancing**: Round-robin requests across multiple GitHub tokens/apps
+- **Rate Limiting**: Built-in rate limiting with configurable requests per hour, applied independently per authentication transport
 - **Caching**: Multiple storage backends (in-memory, PebbleDB, BoltDB, S3, Redis) for response caching using [bored-engineer/github-conditional-http-transport](https://github.com/bored-engineer/github-conditional-http-transport)
 - **Monitoring**: Prometheus metrics for rate limit tracking
 
@@ -103,7 +103,7 @@ Caching is disabled by default; pass one of the flags below to enable it.
 ### Rate Limiting
 
 ```bash
-# Limit to 5000 requests per hour, shared globally across all authentication tokens
+# Limit each configured authentication token/app to 5000 requests per hour
 ./github-api-proxy --rate 5000
 ```
 
@@ -132,7 +132,7 @@ Caching is disabled by default; pass one of the flags below to enable it.
 | `--auth-token` | GitHub personal access token | (none) |
 | `--auth-oauth` | OAuth client ID/secret (format: `client_id:client_secret`) | (none) |
 | `--auth-app` | GitHub App clients (format: `client_id:installation_id:private_key`) | (none) |
-| `--rate` | Maximum requests per hour, shared globally across all authentication tokens | (unlimited) |
+| `--rate` | Maximum requests per hour, applied independently to each configured authentication transport (or to the base transport, if no credentials are configured) | (unlimited) |
 | `--rate-interval` | Interval for rate limit checks | `1m0s` |
 | `--rate-resources` | Resource types to report rate limit metrics for (empty means report all) | `core,graphql` |
 | `--rate-reserve` | Proactively reserve rate limit capacity for in-flight requests before response headers are parsed | `true` |
