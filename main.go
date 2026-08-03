@@ -117,7 +117,7 @@ func main() {
 	authOAuth := pflag.StringSlice("auth-oauth", nil, "OAuth clients for GitHub API authentication in the format 'client_id:client_secret'")
 	authApp := pflag.StringSlice("auth-app", nil, "GitHub App clients for GitHub API authentication in the format 'client_id:installation_id:private_key'")
 	authToken := pflag.StringSlice("auth-token", nil, "GitHub personal access tokens for GitHub API authentication")
-	rate := pflag.Int("rate", 0, "maximum requests per hour, shared globally across all authentication tokens")
+	rate := pflag.Int("rate", 0, "maximum requests per hour, applied independently to each configured authentication transport (or to the base transport, if no credentials are configured)")
 	rateInterval := pflag.Duration("rate-interval", 60*time.Second, "Interval for rate limit checks")
 	rateResources := pflag.StringSlice("rate-resources", []string{"core", "graphql"}, "Resource types to report rate limit metrics for (empty means report all)")
 	rateReserve := pflag.Bool("rate-reserve", true, "Proactively reserve rate limit capacity for in-flight requests before response headers are parsed")
@@ -132,10 +132,9 @@ func main() {
 	logResponseConnReuse := pflag.Bool("log-response-conn-reuse", true, "log whether the upstream connection used for each request was freshly dialed or reused from the pool (response.conn.remote.reused, response.conn.remote.was_idle, response.conn.remote.idle_time)")
 	logRequestHeaders := pflag.Bool("log-request-headers", false, "log the full request headers for each request (the Authorization value, if any, is always replaced with its hash)")
 	logResponseHeaders := pflag.Bool("log-response-headers", false, "log the full response headers for each request (the Authorization value, if any, is always replaced with its hash)")
-	internalPrefix := pflag.String("internal-prefix", "/github-api-proxy/", "URL path prefix under which internal endpoints (pprof, metrics, rate_limits) are served")
+	internalPrefix := pflag.String("internal-prefix", "/github-api-proxy/", "URL path prefix under which internal endpoints (pprof, metrics) are served")
 	pprofEnabled := pflag.Bool("pprof", false, "expose net/http/pprof debug endpoints under <internal-prefix>/pprof/ (WARNING: allows dumping goroutines, heap, and CPU profiles; do not enable on a publicly reachable listener)")
 	metricsEnabled := pflag.Bool("metrics", true, "expose Prometheus metrics under <internal-prefix>/metrics")
-	rateLimitsEnabled := pflag.Bool("rate-limits", false, "expose <internal-prefix>/rate_limits, which live-polls /rate_limit for every configured transport in parallel and returns the aggregated results as JSON")
 	pflag.Parse()
 
 	prefix := path.Join("/", *internalPrefix)
@@ -256,10 +255,20 @@ func main() {
 		return RoundRobin(shuffled)
 	}
 
-	// If credentials were provided, balancing requests across them.
-	var rateLimitSources []RateLimitSource
+	// rateLimited wraps rt with a rate limit of --rate requests per hour, if
+	// configured. Each transport passed through here gets its own independent
+	// budget, rather than a single budget being shared globally across every
+	// transport.
+	rateLimited := func(rt http.RoundTripper) http.RoundTripper {
+		if *rate > 0 {
+			return ratelimit.New(rt, *rate, ratelimit.Per(time.Hour))
+		}
+		return rt
+	}
+
+	// If credentials were provided, round-robin requests across them.
 	if len(*authOAuth) > 0 || len(*authApp) > 0 || len(*authToken) > 0 {
-		var balancing ghratelimit.BalancingTransport
+		var transports []http.RoundTripper
 		// If using OAuth credentials, just use basic auth.
 		for _, params := range *authOAuth {
 			clientID, clientSecret, ok := strings.Cut(params, ":")
@@ -282,8 +291,8 @@ func main() {
 				Reserve: *rateReserve,
 				Spoof:   *rateSpoof,
 			}
-			balancing = append(balancing, t)
-			rateLimitSources = append(rateLimitSources, RateLimitSource{ClientID: clientID, Transport: t})
+			transports = append(transports, rateLimited(t))
+			go t.Poll(ctx, *rateInterval, rateLimitURL)
 		}
 		// If using GitHub App credentials, use the GitHub App transport.
 		for _, appParams := range *authApp {
@@ -318,8 +327,8 @@ func main() {
 				Reserve: *rateReserve,
 				Spoof:   *rateSpoof,
 			}
-			balancing = append(balancing, t)
-			rateLimitSources = append(rateLimitSources, RateLimitSource{ClientID: clientID, InstallationID: installationID, Transport: t})
+			transports = append(transports, rateLimited(t))
+			go t.Poll(ctx, *rateInterval, rateLimitURL)
 		}
 		for _, token := range *authToken {
 			hashed := sha256.Sum256([]byte(token))
@@ -335,19 +344,14 @@ func main() {
 				Reserve: *rateReserve,
 				Spoof:   *rateSpoof,
 			}
-			balancing = append(balancing, t)
-			rateLimitSources = append(rateLimitSources, RateLimitSource{HashedToken: hashedToken, Transport: t})
+			transports = append(transports, rateLimited(t))
+			go t.Poll(ctx, *rateInterval, rateLimitURL)
 		}
-		// Poll the rate limits for each transport.
-		go balancing.Poll(ctx, *rateInterval, rateLimitURL)
-		transport = balancing
-	}
-
-	// If --rate is set, apply a single rate limit shared across all
-	// credentials/source IPs (rather than one budget per credential), so
-	// the configured throughput is a global cap on the proxy as a whole.
-	if *rate > 0 {
-		transport = ratelimit.New(transport, *rate, ratelimit.Per(time.Hour))
+		transport = RoundRobin(transports)
+	} else {
+		// No credentials configured; --rate (if any) applies to the sole
+		// base transport instead.
+		transport = rateLimited(transport)
 	}
 
 	// Setup the reverse proxy.
@@ -376,9 +380,6 @@ func main() {
 	mux.Handle("/api/v3/", http.StripPrefix("/api/v3/", proxy))
 	if *metricsEnabled {
 		mux.Handle(path.Join(prefix, "metrics"), promhttp.Handler())
-	}
-	if *rateLimitsEnabled {
-		mux.Handle(path.Join(prefix, "rate_limits"), RateLimitsHandler(rateLimitSources, rateLimitURL))
 	}
 	if *pprofEnabled {
 		pprofPrefix := path.Join(prefix, "pprof") + "/"

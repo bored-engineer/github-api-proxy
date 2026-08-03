@@ -4,8 +4,8 @@ A high-performance reverse proxy for the GitHub REST API that provides authentic
 
 ## Features
 
-- **Authentication Balancing**: Distribute requests across multiple GitHub tokens/apps
-- **Rate Limiting**: Built-in rate limiting with configurable requests per hour
+- **Authentication Balancing**: Round-robin requests across multiple GitHub tokens/apps
+- **Rate Limiting**: Built-in rate limiting with configurable requests per hour, applied independently per authentication transport
 - **Caching**: Multiple storage backends (in-memory, PebbleDB, BoltDB, S3, Redis) for response caching using [bored-engineer/github-conditional-http-transport](https://github.com/bored-engineer/github-conditional-http-transport)
 - **Monitoring**: Prometheus metrics for rate limit tracking
 
@@ -103,7 +103,7 @@ Caching is disabled by default; pass one of the flags below to enable it.
 ### Rate Limiting
 
 ```bash
-# Limit to 5000 requests per hour, shared globally across all authentication tokens
+# Limit each configured authentication token/app to 5000 requests per hour
 ./github-api-proxy --rate 5000
 ```
 
@@ -132,7 +132,7 @@ Caching is disabled by default; pass one of the flags below to enable it.
 | `--auth-token` | GitHub personal access token | (none) |
 | `--auth-oauth` | OAuth client ID/secret (format: `client_id:client_secret`) | (none) |
 | `--auth-app` | GitHub App clients (format: `client_id:installation_id:private_key`) | (none) |
-| `--rate` | Maximum requests per hour, shared globally across all authentication tokens | (unlimited) |
+| `--rate` | Maximum requests per hour, applied independently to each configured authentication transport (or to the base transport, if no credentials are configured) | (unlimited) |
 | `--rate-interval` | Interval for rate limit checks | `1m0s` |
 | `--rate-resources` | Resource types to report rate limit metrics for (empty means report all) | `core,graphql` |
 | `--rate-reserve` | Proactively reserve rate limit capacity for in-flight requests before response headers are parsed | `true` |
@@ -159,17 +159,15 @@ Caching is disabled by default; pass one of the flags below to enable it.
 | `--log-response-conn-reuse` | Log whether the upstream connection used for each request was freshly dialed or reused from the pool (`response.conn.remote.reused`, `response.conn.remote.was_idle`, `response.conn.remote.idle_time`) | `true` |
 | `--log-request-headers` | Log the full request headers for each request (the `Authorization` value, if any, is always replaced with its hash) | `false` |
 | `--log-response-headers` | Log the full response headers for each request (the `Authorization` value, if any, is always replaced with its hash) | `false` |
-| `--internal-prefix` | URL path prefix under which internal endpoints (`pprof`, `metrics`, `rate_limits`) are served | `/github-api-proxy/` |
+| `--internal-prefix` | URL path prefix under which internal endpoints (`pprof`, `metrics`) are served | `/github-api-proxy/` |
 | `--pprof` | Expose `net/http/pprof` debug endpoints under `<internal-prefix>/pprof/` (WARNING: allows dumping goroutines, heap, and CPU profiles; do not enable on a publicly reachable listener) | `false` |
 | `--metrics` | Expose Prometheus metrics under `<internal-prefix>/metrics` | `true` |
-| `--rate-limits` | Expose `<internal-prefix>/rate_limits`, which live-polls `/rate_limit` for every configured transport in parallel and returns the aggregated results as JSON | `false` |
 
 ## API Endpoints
 
 - `/` - Proxies all requests to the upstream GitHub REST API
 - `<internal-prefix>/metrics` - Prometheus metrics endpoint, only registered when `--metrics` is set (default: enabled, at `/github-api-proxy/metrics`)
 - `<internal-prefix>/pprof/` - `net/http/pprof` debug endpoints, only registered when `--pprof` is set
-- `<internal-prefix>/rate_limits` - Live, parallel poll of `/rate_limit` across every configured authentication transport, only registered when `--rate-limits` is set. Returns a JSON array with one entry per transport (labeled by `client_id`/`installation_id`/`hashed_token`, matching the Prometheus labels below), each containing either its fetched `resources` or an `error`
 
 ## Monitoring
 
