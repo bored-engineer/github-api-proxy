@@ -23,6 +23,15 @@ cd github-api-proxy
 go build -o github-api-proxy .
 ```
 
+Or use the container image, published for `linux/amd64` and `linux/arm64` on every push to `main` (tagged `:main` and with an auto-incrementing `:vX.Y.Z` version):
+
+```bash
+docker run --rm -p 44879:44879 ghcr.io/bored-engineer/github-api-proxy:main \
+  --listen 0.0.0.0:44879
+```
+
+Or download a pre-built binary for linux, macOS, or Windows (amd64 or arm64) from the [Releases](https://github.com/bored-engineer/github-api-proxy/releases) page.
+
 ## Usage
 
 ### Basic Usage
